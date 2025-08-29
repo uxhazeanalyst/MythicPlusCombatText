@@ -1,4 +1,11 @@
 -- ########################################################
+-- MyCombatTextCoachSmart_Dungeon
+-- Copyright (c) 2025 YourName
+-- License: Non-commercial personal use only
+-- ########################################################
+
+
+-- ########################################################
 -- MyCombatTextCoachSmart Options
 -- Allows customization of colors, text size, and features
 -- ########################################################
