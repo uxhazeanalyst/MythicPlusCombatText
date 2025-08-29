@@ -194,6 +194,86 @@ local function ShowCombatSummary()
     end
     combatStats.cooldownsUsed = {}
 end
+-- ########################################################
+-- Track Incoming + Outgoing Damage + Enemy Forces %
+-- ########################################################
+
+local playerGUID = UnitGUID("player")
+local combatLog = {}
+local dungeonSummary = {taken=0, dealt=0, absorbed=0, blocked=0, parries=0, dodges=0, misses=0}
+
+local function ResetCombatLog()
+    combatLog = {taken=0, dealt=0, absorbed=0, blocked=0, parries=0, dodges=0, misses=0}
+end
+
+local function PrintCombatSummary()
+    if Options:IsCombatSummaryEnabled() then
+        print(string.format("Absorbed: %d | Blocked: %d | Parry: %d | Dodge: %d | Misses: %d",
+            combatLog.absorbed, combatLog.blocked, combatLog.parries, combatLog.dodges, combatLog.misses))
+        print(string.format("Damage Taken: %d | Damage Dealt: %d", combatLog.taken, combatLog.dealt))
+    end
+end
+
+local function PrintDungeonSummary()
+    if Options:IsDungeonSummaryEnabled() then
+        local cur, max = C_Scenario.GetCriteriaInfo(1) -- Enemy Forces %
+        print("===== Mythic+ Dungeon Summary =====")
+        print(string.format("Total Taken: %d | Total Dealt: %d", dungeonSummary.taken, dungeonSummary.dealt))
+        print(string.format("Absorbed: %d | Blocked: %d | Parry: %d | Dodge: %d | Misses: %d",
+            dungeonSummary.absorbed, dungeonSummary.blocked, dungeonSummary.parries, dungeonSummary.dodges, dungeonSummary.misses))
+        if cur and max then
+            local percent = (cur / max) * 100
+            print(string.format("Enemy Forces: %.1f%% (%d/%d)", percent, cur, max))
+        end
+        print("===================================")
+    end
+end
+
+-- ########################################################
+-- Combat Log Event Handler
+-- ########################################################
+local frame = CreateFrame("Frame")
+frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+frame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+
+frame:SetScript("OnEvent", function(self, event, ...)
+    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        local _, subevent, _, srcGUID, _, _, _, dstGUID, _, _, _, spellID, spellName, school, amount, overkill, schoolMask, resisted, blocked, absorbed = CombatLogGetCurrentEventInfo()
+
+        -- Incoming damage (NPC -> player)
+        if dstGUID == playerGUID then
+            if subevent == "SWING_DAMAGE" or subevent == "RANGE_DAMAGE" or subevent == "SPELL_DAMAGE" then
+                combatLog.taken = combatLog.taken + (amount or 0)
+                dungeonSummary.taken = dungeonSummary.taken + (amount or 0)
+                if absorbed then combatLog.absorbed = combatLog.absorbed + absorbed; dungeonSummary.absorbed = dungeonSummary.absorbed + absorbed end
+                if blocked then combatLog.blocked = combatLog.blocked + blocked; dungeonSummary.blocked = dungeonSummary.blocked + blocked end
+            elseif subevent == "SWING_MISSED" or subevent == "SPELL_MISSED" then
+                local missType = spellID -- reuse
+                if missType == "PARRY" then combatLog.parries = combatLog.parries + 1; dungeonSummary.parries = dungeonSummary.parries + 1 end
+                if missType == "DODGE" then combatLog.dodges = combatLog.dodges + 1; dungeonSummary.dodges = dungeonSummary.dodges + 1 end
+                if missType == "MISS" then combatLog.misses = combatLog.misses + 1; dungeonSummary.misses = dungeonSummary.misses + 1 end
+            end
+        end
+
+        -- Outgoing damage (player -> NPCs)
+        if srcGUID == playerGUID then
+            if subevent == "SWING_DAMAGE" or subevent == "RANGE_DAMAGE" or subevent == "SPELL_DAMAGE" then
+                combatLog.dealt = combatLog.dealt + (amount or 0)
+                dungeonSummary.dealt = dungeonSummary.dealt + (amount or 0)
+            end
+        end
+
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- Print pull summary when combat ends
+        PrintCombatSummary()
+        ResetCombatLog()
+
+    elseif event == "CHALLENGE_MODE_COMPLETED" then
+        -- Print end of dungeon summary
+        PrintDungeonSummary()
+    end
+end)
 
 -- =======================
 -- Full Dungeon Summary
