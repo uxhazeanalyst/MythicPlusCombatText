@@ -1,14 +1,9 @@
 -- ########################################################
--- MyCombatTextCoachSmart_Dungeon
+-- MyCombatTextCoachSmart Options
 -- Copyright (c) 2025 YourName
 -- License: Non-commercial personal use only
 -- You may not redistribute, sell, or use this addon commercially
 -- without explicit permission.
--- ########################################################
-
--- ########################################################
--- MyCombatTextCoachSmart Options
--- Allows customization of colors, text size, and features
 -- ########################################################
 
 local Options = {}
@@ -17,7 +12,7 @@ local Options = {}
 -- Default Settings
 -- =======================
 Options.defaults = {
-    textSize = 16,  -- size of floating combat text
+    textSize = 16,
     colors = {
         physical = {r=1, g=0, b=0},
         magical  = {r=0.6, g=0.8, b=1},
@@ -35,76 +30,80 @@ Options.defaults = {
 }
 
 -- =======================
--- Current Settings (load defaults initially)
+-- Load Saved Settings or Defaults
 -- =======================
 Options.settings = {}
-for k,v in pairs(Options.defaults) do
-    if type(v)=="table" then
-        Options.settings[k] = {}
-        for key,val in pairs(v) do
-            Options.settings[k][key] = val
+if MyCombatTextDB then
+    for k,v in pairs(Options.defaults) do
+        if type(v)=="table" then
+            Options.settings[k] = {}
+            for key,val in pairs(v) do
+                Options.settings[k][key] = MyCombatTextDB[k] and MyCombatTextDB[k][key] or val
+            end
+        else
+            Options.settings[k] = MyCombatTextDB[k] ~= nil and MyCombatTextDB[k] or v
         end
-    else
-        Options.settings[k] = v
+    end
+else
+    -- no saved data, use defaults
+    for k,v in pairs(Options.defaults) do
+        if type(v)=="table" then
+            Options.settings[k] = {}
+            for key,val in pairs(v) do
+                Options.settings[k][key] = val
+            end
+        else
+            Options.settings[k] = v
+        end
     end
 end
 
 -- =======================
--- Helper: clamp values
+-- Save Current Settings
 -- =======================
-local function clamp(value, min, max)
-    return math.max(min, math.min(max, value))
+local function SaveSettings()
+    MyCombatTextDB = Options.settings
 end
 
 -- =======================
--- Setters
+-- Setters (also save)
 -- =======================
 function Options:SetColor(eventType, r, g, b)
     if self.settings.colors[eventType] then
-        r, g, b = clamp(r,0,1), clamp(g,0,1), clamp(b,0,1)
         self.settings.colors[eventType] = {r=r, g=g, b=b}
+        SaveSettings()
         print(string.format("MyCombatText: %s color set to R:%.2f G:%.2f B:%.2f", eventType, r, g, b))
     end
 end
 
 function Options:SetTextSize(size)
-    size = clamp(size, 8, 64)
     self.settings.textSize = size
+    SaveSettings()
     print("MyCombatText: Text size set to "..size)
 end
 
 function Options:ToggleMultiSchoolTags(state)
     self.settings.showMultiSchoolTags = state
+    SaveSettings()
     print("MyCombatText: Multi-school tags "..(state and "enabled" or "disabled"))
 end
 
 function Options:ToggleCombatSummary(state)
     self.settings.showCombatSummary = state
+    SaveSettings()
     print("MyCombatText: Combat summary "..(state and "enabled" or "disabled"))
 end
 
 function Options:ToggleDungeonSummary(state)
     self.settings.showDungeonSummary = state
+    SaveSettings()
     print("MyCombatText: Dungeon summary "..(state and "enabled" or "disabled"))
 end
 
 function Options:ToggleSmartCoach(state)
     self.settings.enableSmartCoach = state
+    SaveSettings()
     print("MyCombatText: Smart coach "..(state and "enabled" or "disabled"))
-end
-
--- Reset to defaults
-function Options:ResetDefaults()
-    for k,v in pairs(self.defaults) do
-        if type(v)=="table" then
-            for key,val in pairs(v) do
-                self.settings[k][key] = val
-            end
-        else
-            self.settings[k] = v
-        end
-    end
-    print("MyCombatText: Settings reset to defaults.")
 end
 
 -- =======================
@@ -135,19 +134,24 @@ function Options:IsSmartCoachEnabled()
 end
 
 -- =======================
--- Show current settings
+-- Reset to Defaults
 -- =======================
-function Options:ShowSettings()
-    print("=== MyCombatText Current Settings ===")
-    print("Text Size:", self:GetTextSize())
-    print("Multi-School Tags:", self:IsMultiSchoolTagsEnabled() and "ON" or "OFF")
-    print("Combat Summary:", self:IsCombatSummaryEnabled() and "ON" or "OFF")
-    print("Dungeon Summary:", self:IsDungeonSummaryEnabled() and "ON" or "OFF")
-    print("Smart Coach:", self:IsSmartCoachEnabled() and "ON" or "OFF")
+function Options:ResetToDefaults()
+    for k,v in pairs(Options.defaults) do
+        if type(v)=="table" then
+            for key,val in pairs(v) do
+                self.settings[k][key] = val
+            end
+        else
+            self.settings[k] = v
+        end
+    end
+    SaveSettings()
+    print("MyCombatText: Settings reset to defaults.")
 end
 
 -- =======================
--- Slash Command Interface
+-- Slash Commands
 -- =======================
 SLASH_MYCOMBATTEXT1 = "/mcts"
 SLASH_MYCOMBATTEXT2 = "/combattext"
@@ -173,10 +177,8 @@ SlashCmdList["MYCOMBATTEXT"] = function(msg)
         Options:ToggleDungeonSummary(rest=="on")
     elseif cmd=="coach" then
         Options:ToggleSmartCoach(rest=="on")
-    elseif cmd=="show" then
-        Options:ShowSettings()
     elseif cmd=="reset" then
-        Options:ResetDefaults()
+        Options:ResetToDefaults()
     else
         print([[MyCombatText Options:
   /mcts size <number>          - Set text size
@@ -185,8 +187,7 @@ SlashCmdList["MYCOMBATTEXT"] = function(msg)
   /mcts combat on/off          - Enable/Disable combat summaries
   /mcts dungeon on/off         - Enable/Disable dungeon summary
   /mcts coach on/off           - Enable/Disable smart coach
-  /mcts show                   - Show current settings
-  /mcts reset                  - Reset settings to defaults
+  /mcts reset                  - Reset all settings to defaults
 Types: physical, magical, dodge, parry, absorb, miss, block, coach]])
     end
 end
