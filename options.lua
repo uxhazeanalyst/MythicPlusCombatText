@@ -202,6 +202,33 @@ SlashCmdList["MYCOMBATTEXT"]=function(msg)
         print("Usage: /mcts size <num>, colors <type> <r> <g> <b>, multischool on/off, combat on/off, dungeon on/off, coach on/off, reset, export, import <string>")
     end
 end
+-- =======================
+-- Share (Popup EditBox)
+-- =======================
+StaticPopupDialogs["MYCOMBATTEXT_SHARE"] = {
+    text = "Copy this export string:",
+    button1 = "Close",
+    hasEditBox = true,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+    OnShow = function(self, data)
+        local editBox = self.editBox
+        editBox:SetText(data)
+        editBox:HighlightText()
+        editBox:SetFocus()
+    end,
+    EditBoxOnEscapePressed = function(self)
+        self:GetParent():Hide()
+    end,
+}
+
+function Options:Share()
+    local raw = Serialize(self.settings)
+    local encoded = base64enc(raw)
+    StaticPopup_Show("MYCOMBATTEXT_SHARE", nil, nil, encoded)
+end
 
 -- =======================
 -- Global
