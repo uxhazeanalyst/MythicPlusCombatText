@@ -1,6 +1,3 @@
-Here’s a concise, clear `README.md` you can include in your GitHub repo. It explains the addon, installation, and license protections so users know exactly how they can use it.
-
----
 
 ### `README.md`
 
