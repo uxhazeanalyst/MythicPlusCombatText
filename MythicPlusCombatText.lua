@@ -1,12 +1,14 @@
 -- ########################################################
--- MyCombatTextCoachSmart_ClassAware
--- Multi-School Combat Text + Smart Coaching + Post-Combat Summary + Class/Spec-Aware Cooldowns
+-- MyCombatTextCoachSmart_Dungeon
+-- Multi-School Combat Text + Class/Spec Cooldowns + Smart Coaching + Dungeon-Wide Logging
 -- ########################################################
 
 local f = CreateFrame("Frame")
 f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 f:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-f:RegisterEvent("PLAYER_REGEN_ENABLED") -- triggers at combat end
+f:RegisterEvent("PLAYER_REGEN_ENABLED")
+f:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+f:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 
 -- =======================
 -- Color Helper
@@ -82,6 +84,11 @@ local combatStats = {
     criticalsReceived = 0,
     cooldownsUsed = {},
 }
+
+-- =======================
+-- Full Dungeon Log
+-- =======================
+local fullCombatLog = {}
 
 -- =======================
 -- Class/Spec Cooldowns
@@ -181,7 +188,44 @@ local function ShowCombatSummary()
 end
 
 -- =======================
--- Main Event Handler (error-safe)
+-- Full Dungeon Summary
+-- =======================
+local function PrintDungeonSummary()
+    local totalDamage = 0
+    local totalBlocked = 0
+    local totalAbsorbed = 0
+    local totalDodged = 0
+    local totalParried = 0
+    local totalMissed = 0
+
+    for _, entry in ipairs(fullCombatLog) do
+        totalDamage = totalDamage + (entry.damage or 0)
+        totalBlocked = totalBlocked + (entry.blocked or 0)
+        totalAbsorbed = totalAbsorbed + (entry.absorbed or 0)
+        totalDodged = totalDodged + (entry.dodged or 0)
+        totalParried = totalParried + (entry.parried or 0)
+        totalMissed = totalMissed + (entry.missed or 0)
+    end
+
+    ShowCombatText("===== Dungeon Total Summary =====")
+    ShowCombatText("Damage Taken: "..totalDamage)
+    ShowCombatText("Blocked: "..totalBlocked)
+    ShowCombatText("Absorbed: "..totalAbsorbed)
+    ShowCombatText("Dodged: "..totalDodged)
+    ShowCombatText("Parried: "..totalParried)
+    ShowCombatText("Missed: "..totalMissed)
+
+    -- Smart advice
+    if totalBlocked / totalDamage < 0.2 then
+        ShowCombatText("[Coach] Increase block stats and timing of defensive cooldowns!")
+    end
+    if totalAbsorbed / totalDamage < 0.2 then
+        ShowCombatText("[Coach] Improve absorption via shields or defensive abilities!")
+    end
+end
+
+-- =======================
+-- Main Event Handler
 -- =======================
 f:SetScript("OnEvent", function(self, event, ...)
     local success, err = pcall(function()
@@ -240,7 +284,22 @@ f:SetScript("OnEvent", function(self, event, ...)
                 end
             end
 
-            if msg then ShowCombatText(msg,isCrit) end
+            -- Display and log
+            if msg then
+                ShowCombatText(msg,isCrit)
+                table.insert(fullCombatLog, {
+                    timestamp = GetTime(),
+                    eventType = subEvent,
+                    spell = spellName,
+                    damage = amount,
+                    blocked = blocked,
+                    absorbed = absorbed,
+                    dodged = missType=="DODGE" and 1 or 0,
+                    parried = missType=="PARRY" and 1 or 0,
+                    missed = missType=="MISS" and 1 or 0,
+                })
+            end
+
             if math.random()<0.05 then EvaluateCoach() end
 
         elseif event=="UNIT_SPELLCAST_SUCCEEDED" then
@@ -253,6 +312,13 @@ f:SetScript("OnEvent", function(self, event, ...)
 
         elseif event=="PLAYER_REGEN_ENABLED" then
             ShowCombatSummary()
+
+        elseif event=="CHALLENGE_MODE_COMPLETED" then
+            PrintDungeonSummary()
+            fullCombatLog = {}
+
+        elseif event=="PLAYER_SPECIALIZATION_CHANGED" then
+            UpdateTrackedCooldowns()
         end
     end)
     if not success then
@@ -264,13 +330,3 @@ end)
 -- Periodic Smart Coach Evaluation
 -- =======================
 C_Timer.NewTicker(10, EvaluateCoach)
-
--- =======================
--- Update tracked cooldowns if player changes spec
--- =======================
-f:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-f:SetScript("OnEvent", function(self, event, ...)
-    if event=="PLAYER_SPECIALIZATION_CHANGED" then
-        UpdateTrackedCooldowns()
-    end
-end)
