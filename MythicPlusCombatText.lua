@@ -33,20 +33,21 @@ end
 -- Colors
 -- =======================
 local COLORS = {
-    physical = {r=1, g=0, b=0},
-    holy     = {r=1, g=0.9, b=0.5},
-    fire     = {r=1, g=0.3, b=0},
-    nature   = {r=0.2, g=1, b=0.2},
-    frost    = {r=0.5, g=0.8, b=1},
-    shadow   = {r=0.6, g=0.4, b=0.8},
-    arcane   = {r=0.6, g=0.8, b=1},
-    dodge    = {r=1, g=1, b=0},
-    parry    = {r=0, g=1, b=1},
-    absorb   = {r=0, g=1, b=0},
-    miss     = {r=0.7, g=0.7, b=0.7},
-    block    = {r=0.6, g=0.4, b=1},
-    magical  = {r=0.6, g=0.8, b=1},
-    coach    = {r=1, g=0.66, b=0},
+    physical = {r=1, g=0,   b=0},    -- Red
+    bleed    = {r=0.8, g=0, b=0},    -- Darker red for bleed DoTs
+    holy     = {r=1, g=0.84, b=0},   -- Gold/Yellow
+    fire     = {r=1, g=0,   b=0},    -- Bright Red
+    nature   = {r=0.6, g=0.4, b=0.2},-- Brown/Tan
+    frost    = {r=0, g=0.5, b=1},    -- Blue
+    shadow   = {r=0, g=0,   b=0},    -- Black
+    arcane   = {r=0.6, g=0, b=0.8},  -- Purple
+    dodge    = {r=1, g=1,   b=0},    -- Yellow
+    parry    = {r=0, g=1,   b=1},    -- Cyan
+    absorb   = {r=0, g=1,   b=0},    -- Green
+    miss     = {r=0.7, g=0.7, b=0.7},-- Gray
+    block    = {r=0.6, g=0.4, b=1},  -- Lavender
+    magical  = {r=0.6, g=0.8, b=1},  -- Generic magical
+    coach    = {r=1, g=0.66, b=0},   -- Orange coach tips
 }
 
 -- =======================
