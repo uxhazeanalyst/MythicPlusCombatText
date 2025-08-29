@@ -1,4 +1,11 @@
 -- ########################################################
+-- MyCombatTextCoachSmart Options
+-- Copyright (c) 2025 uxhazeanalyst
+-- License: Non-commercial personal use only
+-- ########################################################
+
+
+-- ########################################################
 -- MyCombatTextCoachSmart_Dungeon
 -- Multi-School Combat Text + Class/Spec Cooldowns + Smart Coaching + Dungeon-Wide Logging
 -- ########################################################
