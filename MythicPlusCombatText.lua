@@ -1,7 +1,6 @@
 -- ########################################################
 -- MyCombatTextCoachSmart_Dungeon
--- Multi-School Combat Text + Class/Spec Cooldowns + Smart Coaching + Dungeon-Wide Logging
--- Fully integrated with options.lua
+-- Multi-School Combat Text + Class/Spec Cooldowns + Smart Coaching + Dungeon-Wide Logging + Mythic+ Progress
 -- ########################################################
 
 local f = CreateFrame("Frame")
@@ -10,6 +9,7 @@ f:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 f:RegisterEvent("PLAYER_REGEN_ENABLED")
 f:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 f:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+f:RegisterEvent("UNIT_DIED")
 
 -- =======================
 -- Color Helper
@@ -25,7 +25,7 @@ local function ShowCombatText(msg, isCrit)
 end
 
 -- =======================
--- School Mapping
+-- Colors & School Mapping
 -- =======================
 local SCHOOL_MASKS = {
     [1] = {"Physical", "physical"},
@@ -91,6 +91,18 @@ local function UpdateTrackedCooldowns()
     end
 end
 UpdateTrackedCooldowns()
+
+-- =======================
+-- Mythic+ Progress
+-- =======================
+local mythicProgress = 0       -- running total
+local dungeonTotalWeight = 100 -- approximate total dungeon weight
+
+local function GetMobValue(destGUID)
+    -- Default: normal mob = 3, boss = 10 (can refine using UnitClassification/NPC ID)
+    local value = 3
+    return value
+end
 
 -- =======================
 -- Coaching Functions
@@ -161,7 +173,6 @@ local function ShowCombatSummary()
         PrintCoachAdvice("Parry rate low — consider stats or defensive timing.", "medium")
     end
 
-    -- Reset stats for next combat
     for k,_ in pairs(combatStats) do
         if k~="cooldownsUsed" then combatStats[k]=0 end
     end
@@ -211,6 +222,7 @@ end
 -- =======================
 f:SetScript("OnEvent", function(self, event, ...)
     local success, err = pcall(function()
+        -- === Combat Log ===
         if event=="COMBAT_LOG_EVENT_UNFILTERED" then
             local _, subEvent, _, _, _, _, _, _, _, _,
                   _, spellID, spellName, _, amount, _, school, _, blocked, absorbed, critical, glancing, crushing, isOffHand, missType = CombatLogGetCurrentEventInfo()
@@ -286,6 +298,7 @@ f:SetScript("OnEvent", function(self, event, ...)
 
             if MyCombatTextOptions:IsSmartCoachEnabled() and math.random()<0.05 then EvaluateCoach() end
 
+        -- === Unit Spell Cast ===
         elseif event=="UNIT_SPELLCAST_SUCCEEDED" then
             local unit, spellNameCast = ...
             if unit=="player" and trackedCooldowns[spellNameCast] then
@@ -294,23 +307,30 @@ f:SetScript("OnEvent", function(self, event, ...)
                 PrintCoachAdvice(spellNameCast.." used!","medium")
             end
 
+        -- === Player Leaves Combat ===
         elseif event=="PLAYER_REGEN_ENABLED" then
             ShowCombatSummary()
 
+        -- === Dungeon Completed ===
         elseif event=="CHALLENGE_MODE_COMPLETED" then
             PrintDungeonSummary()
             fullCombatLog = {}
+            mythicProgress = 0
 
+        -- === Player Spec Changed ===
         elseif event=="PLAYER_SPECIALIZATION_CHANGED" then
             UpdateTrackedCooldowns()
+
+        -- === Mob Killed ===
+        elseif event=="UNIT_DIED" then
+            local destGUID, destName = ...
+            local value = GetMobValue(destGUID)
+            mythicProgress = mythicProgress + value
+            ShowCombatText(Colorize("["..value.." Mythic Mob]", MyCombatTextOptions:GetColor("coach")))
+            local percentDone = math.min(100, (mythicProgress / dungeonTotalWeight) * 100)
+            ShowCombatText(Colorize(string.format("Dungeon Progress: %.1f%%", percentDone), MyCombatTextOptions:GetColor("coach")))
         end
     end)
     if not success then
         print("|cffff0000[MyCombatTextCoachSmart] Error:|r "..tostring(err))
     end
-end)
-
--- =======================
--- Periodic Smart Coach Evaluation
--- =======================
-C_Timer.NewTicker(10, EvaluateCoach)
