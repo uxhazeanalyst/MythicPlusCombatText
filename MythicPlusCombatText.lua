@@ -1,7 +1,19 @@
 -- ########################################################
 -- MyCombatTextCoachSmart_Dungeon
+-- Copyright (c) 2025 YourName
+-- License: Non-commercial personal use only
+-- You may not redistribute, sell, or use this addon commercially
+-- without explicit permission.
+-- ########################################################
+
+-- ########################################################
+-- MyCombatTextCoachSmart_Dungeon
 -- Multi-School Combat Text + Class/Spec Cooldowns + Smart Coaching + Dungeon-Wide Logging + Mythic+ Progress
 -- ########################################################
+
+-- SavedVariables support
+MyCombatTextOptions = MyCombatTextOptions or {}
+MyCombatTextOptions.settings = MyCombatTextOptions.settings or {}
 
 local f = CreateFrame("Frame")
 f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
@@ -20,7 +32,7 @@ end
 
 local function ShowCombatText(msg, isCrit)
     if not CombatText_AddMessage then return end
-    local size = MyCombatTextOptions:GetTextSize() or 16
+    local size = MyCombatTextOptions:GetTextSize and MyCombatTextOptions:GetTextSize() or 16
     CombatText_AddMessage(msg, CombatText_StandardScroll, 1,1,1, isCrit and "crit" or nil, false)
 end
 
@@ -44,9 +56,9 @@ local function GetSchoolTags(school)
         return {{"Physical", "physical"}}
     end
     local tags = {{"[Magical]", "magical"}}
-    for _, bit in ipairs(FIXED_ORDER) do
-        if bit.band(school, bit) ~= 0 then
-            local info = SCHOOL_MASKS[bit]
+    for _, bitMask in ipairs(FIXED_ORDER) do
+        if bit32.band(school, bitMask) ~= 0 then
+            local info = SCHOOL_MASKS[bitMask]
             table.insert(tags, {info[1], info[2]})
         end
     end
@@ -100,23 +112,22 @@ local dungeonTotalWeight = 100 -- approximate total dungeon weight
 
 local function GetMobValue(destGUID)
     -- Default: normal mob = 3, boss = 10 (can refine using UnitClassification/NPC ID)
-    local value = 3
-    return value
+    return 3
 end
 
 -- =======================
 -- Coaching Functions
 -- =======================
 local function PrintCoachAdvice(msg, priority)
-    if not MyCombatTextOptions:IsSmartCoachEnabled() then return end
-    local color = MyCombatTextOptions:GetColor("coach")
+    if not MyCombatTextOptions:IsSmartCoachEnabled then return end
+    local color = MyCombatTextOptions:GetColor and MyCombatTextOptions:GetColor("coach") or {r=1,g=0.66,b=0}
     if priority=="high" then color={r=1,g=0.44,b=0.27}
     elseif priority=="low" then color={r=0.66,g=0.66,b=1} end
     ShowCombatText(Colorize("[Coach] "..msg, color))
 end
 
 local function EvaluateCoach()
-    if not MyCombatTextOptions:IsSmartCoachEnabled() then return end
+    if not MyCombatTextOptions:IsSmartCoachEnabled then return end
     local mitigation = 0
     if combatStats.totalDamageTaken>0 then
         mitigation = (combatStats.blocked + combatStats.absorbed)/combatStats.totalDamageTaken*100
@@ -141,7 +152,7 @@ end
 -- Post-Combat Summary
 -- =======================
 local function ShowCombatSummary()
-    if not MyCombatTextOptions:IsCombatSummaryEnabled() then return end
+    if not MyCombatTextOptions:IsCombatSummaryEnabled then return end
 
     local totalDamage = combatStats.totalDamageTaken
     local absorbedPct = totalDamage > 0 and (combatStats.absorbed / totalDamage * 100) or 0
@@ -183,14 +194,10 @@ end
 -- Full Dungeon Summary
 -- =======================
 local function PrintDungeonSummary()
-    if not MyCombatTextOptions:IsDungeonSummaryEnabled() then return end
+    if not MyCombatTextOptions:IsDungeonSummaryEnabled then return end
 
-    local totalDamage = 0
-    local totalBlocked = 0
-    local totalAbsorbed = 0
-    local totalDodged = 0
-    local totalParried = 0
-    local totalMissed = 0
+    local totalDamage, totalBlocked, totalAbsorbed = 0,0,0
+    local totalDodged, totalParried, totalMissed = 0,0,0
 
     for _, entry in ipairs(fullCombatLog) do
         totalDamage = totalDamage + (entry.damage or 0)
@@ -209,11 +216,13 @@ local function PrintDungeonSummary()
     ShowCombatText("Parried: "..totalParried)
     ShowCombatText("Missed: "..totalMissed)
 
-    if totalBlocked / totalDamage < 0.2 then
-        PrintCoachAdvice("Increase block stats and timing of defensive cooldowns!", "high")
-    end
-    if totalAbsorbed / totalDamage < 0.2 then
-        PrintCoachAdvice("Improve absorption via shields or defensive abilities!", "high")
+    if totalDamage > 0 then
+        if totalBlocked / totalDamage < 0.2 then
+            PrintCoachAdvice("Increase block stats and timing of defensive cooldowns!", "high")
+        end
+        if totalAbsorbed / totalDamage < 0.2 then
+            PrintCoachAdvice("Improve absorption via shields or defensive abilities!", "high")
+        end
     end
 end
 
@@ -296,7 +305,7 @@ f:SetScript("OnEvent", function(self, event, ...)
                 })
             end
 
-            if MyCombatTextOptions:IsSmartCoachEnabled() and math.random()<0.05 then EvaluateCoach() end
+            if MyCombatTextOptions:IsSmartCoachEnabled and math.random()<0.05 then EvaluateCoach() end
 
         -- === Unit Spell Cast ===
         elseif event=="UNIT_SPELLCAST_SUCCEEDED" then
@@ -323,7 +332,7 @@ f:SetScript("OnEvent", function(self, event, ...)
 
         -- === Mob Killed ===
         elseif event=="UNIT_DIED" then
-            local destGUID, destName = ...
+            local destGUID = ...
             local value = GetMobValue(destGUID)
             mythicProgress = mythicProgress + value
             ShowCombatText(Colorize("["..value.." Mythic Mob]", MyCombatTextOptions:GetColor("coach")))
@@ -334,3 +343,4 @@ f:SetScript("OnEvent", function(self, event, ...)
     if not success then
         print("|cffff0000[MyCombatTextCoachSmart] Error:|r "..tostring(err))
     end
+end)
