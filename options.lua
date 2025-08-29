@@ -1,6 +1,6 @@
 -- ########################################################
 -- MyCombatTextCoachSmart Options
--- Copyright (c) 2025 YourName
+-- Copyright (c) 2025 uxhazeanalyst
 -- License: Non-commercial personal use only
 -- ########################################################
 
