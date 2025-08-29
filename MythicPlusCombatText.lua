@@ -111,6 +111,8 @@ local function UpdateTrackedCooldowns()
         end
     end
 end
+
+-- Call once at load
 UpdateTrackedCooldowns()
 
 -- =======================
@@ -123,26 +125,23 @@ local function PrintCoachAdvice(msg, priority)
     ShowCombatText(Colorize("[Coach] "..msg, color))
 end
 
--- Real-time coach evaluation
-local function RealTimeCoachUpdate()
-    local totalTaken = combatStats.totalDamageTaken
-    if totalTaken == 0 then return end
-
-    local mitigation = (combatStats.blocked + combatStats.absorbed)/totalTaken*100
-    if mitigation < 20 then
-        PrintCoachAdvice("Mitigation critically low! Use defensive cooldowns now!", "high")
-    elseif mitigation < 50 then
-        PrintCoachAdvice("Mitigation below optimal, consider defensive abilities.", "medium")
-    else
-        PrintCoachAdvice("Mitigation excellent!", "low")
+local function EvaluateCoach()
+    local mitigation = 0
+    if combatStats.totalDamageTaken>0 then
+        mitigation = (combatStats.blocked + combatStats.absorbed)/combatStats.totalDamageTaken*100
     end
 
-    -- Check unused cooldowns in real-time
-    local now = GetTime()
+    if mitigation<20 then
+        PrintCoachAdvice("Mitigation low! Use defensive cooldowns more efficiently.", "high")
+    elseif mitigation<50 then
+        PrintCoachAdvice("Good mitigation, room to improve timing.", "medium")
+    else
+        PrintCoachAdvice("Excellent mitigation this pull!", "low")
+    end
+
     for spell, _ in pairs(trackedCooldowns) do
-        local lastUsed = combatStats.cooldownsUsed[spell] and combatStats.cooldownsUsed[spell][#combatStats.cooldownsUsed[spell]] or 0
-        if now - lastUsed > 20 then
-            PrintCoachAdvice(spell.." hasn't been used recently!", "high")
+        if not combatStats.cooldownsUsed[spell] or #combatStats.cooldownsUsed[spell]==0 then
+            PrintCoachAdvice(spell.." not used! Consider using during high-damage phases.", "high")
         end
     end
 end
@@ -172,15 +171,16 @@ local function ShowCombatSummary()
     ShowCombatText("Cooldowns Missed: "..missedCooldownsText)
 
     if absorbedPct < 20 then
-        ShowCombatText("[Coach] Improve absorption!")
+        ShowCombatText("[Coach] Consider improving absorption through shields or defensive abilities.")
     end
     if blockedPct < 20 then
-        ShowCombatText("[Coach] Improve block timing!")
+        ShowCombatText("[Coach] Increase block effectiveness, timing defensive cooldowns better.")
     end
     if parryRate < 10 then
-        ShowCombatText("[Coach] Parry rate low — consider defensive timing.")
+        ShowCombatText("[Coach] Parry rate low — consider stats or defensive timing.")
     end
 
+    -- Reset stats for next combat
     for k,_ in pairs(combatStats) do
         if k~="cooldownsUsed" then combatStats[k]=0 end
     end
@@ -191,7 +191,13 @@ end
 -- Full Dungeon Summary
 -- =======================
 local function PrintDungeonSummary()
-    local totalDamage, totalBlocked, totalAbsorbed, totalDodged, totalParried, totalMissed = 0,0,0,0,0,0
+    local totalDamage = 0
+    local totalBlocked = 0
+    local totalAbsorbed = 0
+    local totalDodged = 0
+    local totalParried = 0
+    local totalMissed = 0
+
     for _, entry in ipairs(fullCombatLog) do
         totalDamage = totalDamage + (entry.damage or 0)
         totalBlocked = totalBlocked + (entry.blocked or 0)
@@ -209,11 +215,12 @@ local function PrintDungeonSummary()
     ShowCombatText("Parried: "..totalParried)
     ShowCombatText("Missed: "..totalMissed)
 
+    -- Smart advice
     if totalBlocked / totalDamage < 0.2 then
-        ShowCombatText("[Coach] Increase block stats and timing!")
+        ShowCombatText("[Coach] Increase block stats and timing of defensive cooldowns!")
     end
     if totalAbsorbed / totalDamage < 0.2 then
-        ShowCombatText("[Coach] Improve absorption!")
+        ShowCombatText("[Coach] Improve absorption via shields or defensive abilities!")
     end
 end
 
@@ -226,10 +233,16 @@ f:SetScript("OnEvent", function(self, event, ...)
             local _, subEvent, _, _, _, _, _, _, _, _,
                   _, spellID, spellName, _, amount, _, school, _, blocked, absorbed, critical, glancing, crushing, isOffHand, missType = CombatLogGetCurrentEventInfo()
 
-            amount = amount or 0; blocked = blocked or 0; absorbed = absorbed or 0
-            spellName = spellName or "Unknown"; school = school or 0; critical = critical or false; missType = missType or ""
+            amount = amount or 0
+            blocked = blocked or 0
+            absorbed = absorbed or 0
+            spellName = spellName or "Unknown"
+            school = school or 0
+            critical = critical or false
+            missType = missType or ""
 
             local msg, isCrit = nil, false
+
             if subEvent=="SWING_DAMAGE" then
                 msg = Colorize(string.format("-%d (Physical)", amount), COLORS.physical)
                 if blocked>0 then msg = msg.." "..Colorize("[Blocked "..blocked.."]", COLORS.block) end
@@ -239,12 +252,18 @@ f:SetScript("OnEvent", function(self, event, ...)
                 combatStats.blocked = combatStats.blocked + blocked
                 combatStats.absorbed = combatStats.absorbed + absorbed
                 if critical then combatStats.criticalsReceived = combatStats.criticalsReceived+1 end
+
             elseif subEvent=="SPELL_DAMAGE" or subEvent=="RANGE_DAMAGE" then
                 local schoolTags = GetSchoolTags(school)
                 local spellText = string.format("-%d (%s)", amount, spellName)
-                local magicalTag = #schoolTags>0 and schoolTags[1][1]=="[Magical]" and Colorize(schoolTags[1][1], schoolTags[1][2]) or ""
+                local magicalTag = ""
+                if #schoolTags>0 and schoolTags[1][1]=="[Magical]" then
+                    magicalTag = Colorize(schoolTags[1][1], schoolTags[1][2])
+                end
                 local elementTags=""
-                for i=2,#schoolTags do elementTags = elementTags.." "..Colorize(schoolTags[i][1], schoolTags[i][2]) end
+                for i=2,#schoolTags do
+                    elementTags = elementTags.." "..Colorize(schoolTags[i][1], schoolTags[i][2])
+                end
                 local modifiers=""
                 if blocked>0 then modifiers = modifiers.." "..Colorize("[Blocked "..blocked.."]", COLORS.block) end
                 if absorbed>0 then modifiers = modifiers.." "..Colorize("[Absorbed "..absorbed.."]", COLORS.absorb) end
@@ -265,6 +284,7 @@ f:SetScript("OnEvent", function(self, event, ...)
                 end
             end
 
+            -- Display and log
             if msg then
                 ShowCombatText(msg,isCrit)
                 table.insert(fullCombatLog, {
@@ -280,8 +300,7 @@ f:SetScript("OnEvent", function(self, event, ...)
                 })
             end
 
-            -- Real-time coach evaluation
-            RealTimeCoachUpdate()
+            if math.random()<0.05 then EvaluateCoach() end
 
         elseif event=="UNIT_SPELLCAST_SUCCEEDED" then
             local unit, spellNameCast = ...
@@ -308,6 +327,6 @@ f:SetScript("OnEvent", function(self, event, ...)
 end)
 
 -- =======================
--- Periodic Reinforcement
+-- Periodic Smart Coach Evaluation
 -- =======================
-C_Timer.NewTicker(10, function() RealTimeCoachUpdate() end)
+C_Timer.NewTicker(10, EvaluateCoach)
