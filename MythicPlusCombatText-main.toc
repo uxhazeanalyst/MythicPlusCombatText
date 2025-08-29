@@ -3,6 +3,7 @@
 ## Notes: Custom combat text using Blizzard’s default Floating Combat Text, showing only Physical, Magical, Parry, Dodged, Absorbed, and Missed.
 ## Author: uxhazeanalyst
 ## Version: 1.1
+## SavedVariables: MyCombatTextDB
 
 MythicPlusCombatText.lua
 options.lua
