@@ -5,7 +5,7 @@
 # MyCombatTextCoachSmart_Dungeon
 
 **Version:** 1.0  
-**Author:** YourName  
+**Author:** uxhazeanalyst  
 **License:** Non-commercial personal use only (see LICENSE.txt)
 
 ---
