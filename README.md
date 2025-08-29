@@ -73,16 +73,23 @@ All rights reserved. Please see `LICENSE.txt` for full details.
 
 For questions, suggestions, or bug reports, contact **YourName** or open an issue on this repository.
 ```
-================================
-# SLASH COMMANDS
-================================
+```
+## Slash Commands
+```
 /mcts size <num>        → Set text size (e.g. /mcts size 20)
-/mcts colors <type> <r> <g> <b> 
-                       → Set custom RGB color (0-1 range)
+
+/mcts colors <type> <r> <g> <b> → Set custom RGB color (0-1 range)
+                       
 /mcts multischool on/off → Toggle showing multi-school tags
+
 /mcts combat on/off      → Toggle end-of-combat summaries
+
 /mcts dungeon on/off     → Toggle end-of-dungeon summary
+
 /mcts coach on/off       → Toggle smart coaching advice
+
 /mcts reset              → Reset all settings to defaults
+
 /mcts share              → Export your settings as a Base64 string
+
 /mcts import <string>    → Import settings from a Base64 string
