@@ -413,6 +413,56 @@ f:SetScript("OnEvent", function(self, event, ...)
         print("|cffff0000[MyCombatTextCoachSmart] Error:|r "..tostring(err))
     end
 end)
+-- ########################################################
+-- Floating Combat Text: Per-Mob Forces Updates (detailed)
+-- ########################################################
+
+local prevForces = 0
+
+local function ShowForcesFloatingText()
+    local cur, max = select(4, C_Scenario.GetCriteriaInfo(1)), select(5, C_Scenario.GetCriteriaInfo(1))
+    if cur and max and max > 0 then
+        local gained = cur - prevForces
+        prevForces = cur
+
+        local percent = (cur / max) * 100
+        local mobTag = string.format("[+%d mythic mob]", gained)
+        local percentTag = string.format("[%.1f%% total]", percent)
+        local rawTag = string.format("[%d/%d]", cur, max)
+
+        local msg = mobTag .. " " .. percentTag .. " " .. rawTag
+
+        CombatText_AddMessage(
+            msg,
+            CombatText_StandardScroll,
+            0.1, 0.8, 1.0, -- cyan-ish
+            "sticky",
+            false
+        )
+    end
+end
+
+-- Extend OnEvent handler
+frame:SetScript("OnEvent", function(self, event, ...)
+    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        local _, subevent = CombatLogGetCurrentEventInfo()
+
+        -- === Mob Death (forces %) ===
+        if subevent == "UNIT_DIED" then
+            C_Timer.After(0.5, ShowForcesFloatingText)
+        end
+
+        -- (existing incoming/outgoing damage logic…)
+
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        prevForces = 0 -- reset per dungeon start
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        PrintCombatSummary()
+        ResetCombatLog()
+    elseif event == "CHALLENGE_MODE_COMPLETED" then
+        PrintDungeonSummary()
+    end
+end)
 
 -- =======================
 -- Periodic Smart Coach Evaluation
