@@ -4,6 +4,7 @@
 ## Author: uxhazeanalyst
 ## Version: 1.1
 ## SavedVariables: MyCombatTextDB
+## SavedVariablesPerCharacter: MyCombatTextCharDB
 
 MythicPlusCombatText.lua
 options.lua
