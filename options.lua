@@ -198,6 +198,7 @@ SlashCmdList["MYCOMBATTEXT"]=function(msg)
     elseif cmd=="reset" then Options:ResetToDefaults()
     elseif cmd=="export" then Options:Export()
     elseif cmd=="import" then Options:Import(rest)
+    elseif cmd=="share" then Options:Share()
     else
         print("Usage: /mcts size <num>, colors <type> <r> <g> <b>, multischool on/off, combat on/off, dungeon on/off, coach on/off, reset, export, import <string>")
     end
