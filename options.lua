@@ -6,8 +6,6 @@
 -- without explicit permission.
 -- ########################################################
 
-
-
 -- ########################################################
 -- MyCombatTextCoachSmart Options
 -- Allows customization of colors, text size, and features
@@ -52,16 +50,25 @@ for k,v in pairs(Options.defaults) do
 end
 
 -- =======================
+-- Helper: clamp values
+-- =======================
+local function clamp(value, min, max)
+    return math.max(min, math.min(max, value))
+end
+
+-- =======================
 -- Setters
 -- =======================
 function Options:SetColor(eventType, r, g, b)
     if self.settings.colors[eventType] then
+        r, g, b = clamp(r,0,1), clamp(g,0,1), clamp(b,0,1)
         self.settings.colors[eventType] = {r=r, g=g, b=b}
         print(string.format("MyCombatText: %s color set to R:%.2f G:%.2f B:%.2f", eventType, r, g, b))
     end
 end
 
 function Options:SetTextSize(size)
+    size = clamp(size, 8, 64)
     self.settings.textSize = size
     print("MyCombatText: Text size set to "..size)
 end
@@ -84,6 +91,20 @@ end
 function Options:ToggleSmartCoach(state)
     self.settings.enableSmartCoach = state
     print("MyCombatText: Smart coach "..(state and "enabled" or "disabled"))
+end
+
+-- Reset to defaults
+function Options:ResetDefaults()
+    for k,v in pairs(self.defaults) do
+        if type(v)=="table" then
+            for key,val in pairs(v) do
+                self.settings[k][key] = val
+            end
+        else
+            self.settings[k] = v
+        end
+    end
+    print("MyCombatText: Settings reset to defaults.")
 end
 
 -- =======================
@@ -114,6 +135,18 @@ function Options:IsSmartCoachEnabled()
 end
 
 -- =======================
+-- Show current settings
+-- =======================
+function Options:ShowSettings()
+    print("=== MyCombatText Current Settings ===")
+    print("Text Size:", self:GetTextSize())
+    print("Multi-School Tags:", self:IsMultiSchoolTagsEnabled() and "ON" or "OFF")
+    print("Combat Summary:", self:IsCombatSummaryEnabled() and "ON" or "OFF")
+    print("Dungeon Summary:", self:IsDungeonSummaryEnabled() and "ON" or "OFF")
+    print("Smart Coach:", self:IsSmartCoachEnabled() and "ON" or "OFF")
+end
+
+-- =======================
 -- Slash Command Interface
 -- =======================
 SLASH_MYCOMBATTEXT1 = "/mcts"
@@ -140,17 +173,21 @@ SlashCmdList["MYCOMBATTEXT"] = function(msg)
         Options:ToggleDungeonSummary(rest=="on")
     elseif cmd=="coach" then
         Options:ToggleSmartCoach(rest=="on")
+    elseif cmd=="show" then
+        Options:ShowSettings()
+    elseif cmd=="reset" then
+        Options:ResetDefaults()
     else
-        print([[
-MyCombatText Options:
+        print([[MyCombatText Options:
   /mcts size <number>          - Set text size
   /mcts colors <type> <r> <g> <b>  - Set color (0-1 range)
   /mcts multischool on/off     - Enable/Disable multi-school tags
   /mcts combat on/off          - Enable/Disable combat summaries
   /mcts dungeon on/off         - Enable/Disable dungeon summary
   /mcts coach on/off           - Enable/Disable smart coach
-Types: physical, magical, dodge, parry, absorb, miss, block, coach
-]])
+  /mcts show                   - Show current settings
+  /mcts reset                  - Reset settings to defaults
+Types: physical, magical, dodge, parry, absorb, miss, block, coach]])
     end
 end
 
