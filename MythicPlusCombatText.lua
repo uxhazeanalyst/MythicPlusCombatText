@@ -1,10 +1,11 @@
 -- ########################################################
--- MyCombatTextCoachSmart - Multi-School Combat Text + Smart Coaching
+-- MyCombatTextCoachSmart - Multi-School Combat Text + Smart Coaching + Post-Combat Summary
 -- ########################################################
 
 local f = CreateFrame("Frame")
 f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 f:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+f:RegisterEvent("PLAYER_REGEN_ENABLED") -- triggers at combat end
 
 -- =======================
 -- Color Helper
@@ -112,15 +113,47 @@ local function EvaluateCoach()
             PrintCoachAdvice(spell.." not used! Consider using during high-damage phases.", "high")
         end
     end
+end
 
-    -- Reset stats for next window
-    combatStats.totalDamageTaken=0
-    combatStats.blocked=0
-    combatStats.absorbed=0
-    combatStats.parried=0
-    combatStats.dodged=0
-    combatStats.missed=0
-    combatStats.criticalsReceived=0
+-- =======================
+-- Post-Combat Summary
+-- =======================
+local function ShowCombatSummary()
+    local totalDamage = combatStats.totalDamageTaken
+    local absorbedPct = totalDamage > 0 and (combatStats.absorbed / totalDamage * 100) or 0
+    local blockedPct  = totalDamage > 0 and (combatStats.blocked / totalDamage * 100) or 0
+    local parryRate   = (combatStats.parried + combatStats.dodged + combatStats.missed) > 0 and
+                        (combatStats.parried / (combatStats.parried + combatStats.dodged + combatStats.missed) * 100) or 0
+
+    local missedCooldowns = {}
+    for spell,_ in pairs(trackedCooldowns) do
+        if not combatStats.cooldownsUsed[spell] or #combatStats.cooldownsUsed[spell]==0 then
+            table.insert(missedCooldowns, spell)
+        end
+    end
+    local missedCooldownsText = #missedCooldowns>0 and table.concat(missedCooldowns, ", ") or "None"
+
+    ShowCombatText("===== Combat Summary =====")
+    ShowCombatText(string.format("Absorbed: %d (%.1f%%)", combatStats.absorbed, absorbedPct))
+    ShowCombatText(string.format("Blocked: %d (%.1f%%)", combatStats.blocked, blockedPct))
+    ShowCombatText(string.format("Parry Rate: %.1f%%", parryRate))
+    ShowCombatText("Cooldowns Missed: "..missedCooldownsText)
+
+    if absorbedPct < 20 then
+        ShowCombatText("[Coach] Consider improving absorption through shields or Barkskin.")
+    end
+    if blockedPct < 20 then
+        ShowCombatText("[Coach] Increase block effectiveness, timing Shield Wall better.")
+    end
+    if parryRate < 10 then
+        ShowCombatText("[Coach] Parry rate low — consider stats or defensive timing.")
+    end
+
+    -- Reset stats for next combat
+    for k,_ in pairs(combatStats) do
+        if k~="cooldownsUsed" then combatStats[k]=0 end
+    end
+    combatStats.cooldownsUsed = {}
 end
 
 -- =======================
@@ -199,6 +232,9 @@ f:SetScript("OnEvent", function(self, event, ...)
             table.insert(combatStats.cooldownsUsed[spellNameCast], GetTime())
             PrintCoachAdvice(spellNameCast.." used!","medium")
         end
+
+    elseif event=="PLAYER_REGEN_ENABLED" then
+        ShowCombatSummary()
     end
 end)
 
