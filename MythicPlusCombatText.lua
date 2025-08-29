@@ -1,5 +1,6 @@
 -- ########################################################
--- MyCombatTextCoachSmart - Multi-School Combat Text + Smart Coaching + Post-Combat Summary
+-- MyCombatTextCoachSmart_ClassAware
+-- Multi-School Combat Text + Smart Coaching + Post-Combat Summary + Class/Spec-Aware Cooldowns
 -- ########################################################
 
 local f = CreateFrame("Frame")
@@ -35,7 +36,7 @@ local COLORS = {
     absorb   = {r=0, g=1, b=0},
     miss     = {r=0.7, g=0.7, b=0.7},
     block    = {r=0.6, g=0.4, b=1},
-    magical  = {r=0.6, g=0.8, b=1}, -- pale blue
+    magical  = {r=0.6, g=0.8, b=1},
     coach    = {r=1, g=0.66, b=0},
 }
 
@@ -58,7 +59,7 @@ local function GetSchoolTags(school)
     if not school or school == 1 then
         return {{"Physical", COLORS.physical}}
     end
-    local tags = {{"[Magical]", COLORS.magical}} -- always show Magical for non-physical
+    local tags = {{"[Magical]", COLORS.magical}}
     for _, bit in ipairs(FIXED_ORDER) do
         if bit.band(school, bit) ~= 0 then
             local info = SCHOOL_MASKS[bit]
@@ -69,7 +70,7 @@ local function GetSchoolTags(school)
 end
 
 -- =======================
--- Combat Coach Stats
+-- Combat Stats
 -- =======================
 local combatStats = {
     totalDamageTaken = 0,
@@ -82,7 +83,30 @@ local combatStats = {
     cooldownsUsed = {},
 }
 
-local trackedCooldowns = {["Shield Wall"]=true, ["Barkskin"]=true, ["Ice Block"]=true}
+-- =======================
+-- Class/Spec Cooldowns
+-- =======================
+local classCooldowns = {
+    WARRIOR = {"Shield Wall", "Last Stand", "Rallying Cry"},
+    DRUID   = {"Barkskin", "Ironfur", "Survival Instincts"},
+    MAGE    = {"Ice Block"},
+    PALADIN = {"Divine Shield", "Guardian of Ancient Kings"},
+    DEATHKNIGHT = {"Anti-Magic Shell", "Icebound Fortitude"},
+}
+
+local trackedCooldowns = {}
+local function UpdateTrackedCooldowns()
+    trackedCooldowns = {}
+    local _, playerClass = UnitClass("player")
+    if classCooldowns[playerClass] then
+        for _, spellName in ipairs(classCooldowns[playerClass]) do
+            trackedCooldowns[spellName] = true
+        end
+    end
+end
+
+-- Call once at load
+UpdateTrackedCooldowns()
 
 -- =======================
 -- Coaching Functions
@@ -140,10 +164,10 @@ local function ShowCombatSummary()
     ShowCombatText("Cooldowns Missed: "..missedCooldownsText)
 
     if absorbedPct < 20 then
-        ShowCombatText("[Coach] Consider improving absorption through shields or Barkskin.")
+        ShowCombatText("[Coach] Consider improving absorption through shields or defensive abilities.")
     end
     if blockedPct < 20 then
-        ShowCombatText("[Coach] Increase block effectiveness, timing Shield Wall better.")
+        ShowCombatText("[Coach] Increase block effectiveness, timing defensive cooldowns better.")
     end
     if parryRate < 10 then
         ShowCombatText("[Coach] Parry rate low — consider stats or defensive timing.")
@@ -157,84 +181,82 @@ local function ShowCombatSummary()
 end
 
 -- =======================
--- Main Event Handler
+-- Main Event Handler (error-safe)
 -- =======================
 f:SetScript("OnEvent", function(self, event, ...)
-    if event=="COMBAT_LOG_EVENT_UNFILTERED" then
-        local _, subEvent, _, _, _, _, _, _, _, _,
-        _, spellID, spellName, _, amount, _, school, _, blocked, absorbed, critical, glancing, crushing, isOffHand, missType = CombatLogGetCurrentEventInfo()
+    local success, err = pcall(function()
+        if event=="COMBAT_LOG_EVENT_UNFILTERED" then
+            local _, subEvent, _, _, _, _, _, _, _, _,
+                  _, spellID, spellName, _, amount, _, school, _, blocked, absorbed, critical, glancing, crushing, isOffHand, missType = CombatLogGetCurrentEventInfo()
 
-        local msg, isCrit = nil, false
+            amount = amount or 0
+            blocked = blocked or 0
+            absorbed = absorbed or 0
+            spellName = spellName or "Unknown"
+            school = school or 0
+            critical = critical or false
+            missType = missType or ""
 
-        -- -----------------------
-        -- Damage + Multi-School
-        -- -----------------------
-        if subEvent=="SWING_DAMAGE" then
-            msg = Colorize(string.format("-%d (Physical)", amount or 0), COLORS.physical)
-            if blocked and blocked>0 then msg = msg.." "..Colorize("[Blocked "..blocked.."]", COLORS.block) end
-            if absorbed and absorbed>0 then msg = msg.." "..Colorize("[Absorbed "..absorbed.."]", COLORS.absorb) end
-            if critical then isCrit=true end
+            local msg, isCrit = nil, false
 
-            combatStats.totalDamageTaken = combatStats.totalDamageTaken + (amount or 0)
-            if blocked then combatStats.blocked = combatStats.blocked+blocked end
-            if absorbed then combatStats.absorbed = combatStats.absorbed+absorbed end
-            if critical then combatStats.criticalsReceived = combatStats.criticalsReceived+1 end
+            if subEvent=="SWING_DAMAGE" then
+                msg = Colorize(string.format("-%d (Physical)", amount), COLORS.physical)
+                if blocked>0 then msg = msg.." "..Colorize("[Blocked "..blocked.."]", COLORS.block) end
+                if absorbed>0 then msg = msg.." "..Colorize("[Absorbed "..absorbed.."]", COLORS.absorb) end
+                if critical then isCrit=true end
+                combatStats.totalDamageTaken = combatStats.totalDamageTaken + amount
+                combatStats.blocked = combatStats.blocked + blocked
+                combatStats.absorbed = combatStats.absorbed + absorbed
+                if critical then combatStats.criticalsReceived = combatStats.criticalsReceived+1 end
 
-        elseif subEvent=="SPELL_DAMAGE" or subEvent=="RANGE_DAMAGE" then
-            local schoolTags = GetSchoolTags(school)
-            local spellText = string.format("-%d (%s)", amount or 0, spellName or "Spell")
-
-            -- [Magical] immediately after spell name
-            local magicalTag = ""
-            if #schoolTags>0 and schoolTags[1][1]=="[Magical]" then
-                magicalTag = Colorize(schoolTags[1][1], schoolTags[1][2])
+            elseif subEvent=="SPELL_DAMAGE" or subEvent=="RANGE_DAMAGE" then
+                local schoolTags = GetSchoolTags(school)
+                local spellText = string.format("-%d (%s)", amount, spellName)
+                local magicalTag = ""
+                if #schoolTags>0 and schoolTags[1][1]=="[Magical]" then
+                    magicalTag = Colorize(schoolTags[1][1], schoolTags[1][2])
+                end
+                local elementTags=""
+                for i=2,#schoolTags do
+                    elementTags = elementTags.." "..Colorize(schoolTags[i][1], schoolTags[i][2])
+                end
+                local modifiers=""
+                if blocked>0 then modifiers = modifiers.." "..Colorize("[Blocked "..blocked.."]", COLORS.block) end
+                if absorbed>0 then modifiers = modifiers.." "..Colorize("[Absorbed "..absorbed.."]", COLORS.absorb) end
+                msg = Colorize(spellText, schoolTags[2] and schoolTags[2][2] or COLORS.magical).." "..magicalTag..elementTags..modifiers
+                if critical then isCrit=true end
+                combatStats.totalDamageTaken = combatStats.totalDamageTaken + amount
+                combatStats.blocked = combatStats.blocked + blocked
+                combatStats.absorbed = combatStats.absorbed + absorbed
+                if critical then combatStats.criticalsReceived = combatStats.criticalsReceived+1 end
             end
 
-            -- Remaining elemental schools
-            local elementTags=""
-            for i=2,#schoolTags do
-                elementTags = elementTags.." "..Colorize(schoolTags[i][1], schoolTags[i][2])
+            if subEvent=="SWING_MISSED" or subEvent=="SPELL_MISSED" or subEvent=="RANGE_MISSED" then
+                if missType=="DODGE" then combatStats.dodged=combatStats.dodged+1; msg=Colorize("Dodged",COLORS.dodge)
+                elseif missType=="PARRY" then combatStats.parried=combatStats.parried+1; msg=Colorize("Parried",COLORS.parry)
+                elseif missType=="MISS" then combatStats.missed=combatStats.missed+1; msg=Colorize("Missed",COLORS.miss)
+                elseif missType=="ABSORB" then combatStats.absorbed=combatStats.absorbed+amount; msg=Colorize("Absorbed",COLORS.absorb)
+                elseif missType=="BLOCK" then combatStats.blocked=combatStats.blocked+amount; msg=Colorize("Blocked",COLORS.block)
+                end
             end
 
-            -- Modifiers
-            local modifiers=""
-            if blocked and blocked>0 then modifiers = modifiers.." "..Colorize("[Blocked "..blocked.."]", COLORS.block) end
-            if absorbed and absorbed>0 then modifiers = modifiers.." "..Colorize("[Absorbed "..absorbed.."]", COLORS.absorb) end
+            if msg then ShowCombatText(msg,isCrit) end
+            if math.random()<0.05 then EvaluateCoach() end
 
-            msg = Colorize(spellText, schoolTags[2] and schoolTags[2][2] or COLORS.magical).." "..magicalTag..elementTags..modifiers
-            if critical then isCrit=true end
-
-            combatStats.totalDamageTaken = combatStats.totalDamageTaken + (amount or 0)
-            if blocked then combatStats.blocked = combatStats.blocked+blocked end
-            if absorbed then combatStats.absorbed = combatStats.absorbed+absorbed end
-            if critical then combatStats.criticalsReceived = combatStats.criticalsReceived+1 end
-        end
-
-        -- -----------------------
-        -- Avoidance / Miss
-        -- -----------------------
-        if subEvent=="SWING_MISSED" or subEvent=="SPELL_MISSED" or subEvent=="RANGE_MISSED" then
-            if missType=="DODGE" then combatStats.dodged=combatStats.dodged+1; msg=Colorize("Dodged",COLORS.dodge)
-            elseif missType=="PARRY" then combatStats.parried=combatStats.parried+1; msg=Colorize("Parried",COLORS.parry)
-            elseif missType=="MISS" then combatStats.missed=combatStats.missed+1; msg=Colorize("Missed",COLORS.miss)
-            elseif missType=="ABSORB" then combatStats.absorbed=combatStats.absorbed+amount; msg=Colorize("Absorbed",COLORS.absorb)
-            elseif missType=="BLOCK" then combatStats.blocked=combatStats.blocked+amount; msg=Colorize("Blocked",COLORS.block)
+        elseif event=="UNIT_SPELLCAST_SUCCEEDED" then
+            local unit, spellNameCast = ...
+            if unit=="player" and trackedCooldowns[spellNameCast] then
+                if not combatStats.cooldownsUsed[spellNameCast] then combatStats.cooldownsUsed[spellNameCast]={} end
+                table.insert(combatStats.cooldownsUsed[spellNameCast], GetTime())
+                PrintCoachAdvice(spellNameCast.." used!","medium")
             end
+
+        elseif event=="PLAYER_REGEN_ENABLED" then
+            ShowCombatSummary()
         end
-
-        if msg then ShowCombatText(msg,isCrit) end
-        if math.random()<0.05 then EvaluateCoach() end
-
-    elseif event=="UNIT_SPELLCAST_SUCCEEDED" then
-        local unit, spellNameCast = ...
-        if unit=="player" and trackedCooldowns[spellNameCast] then
-            if not combatStats.cooldownsUsed[spellNameCast] then combatStats.cooldownsUsed[spellNameCast]={} end
-            table.insert(combatStats.cooldownsUsed[spellNameCast], GetTime())
-            PrintCoachAdvice(spellNameCast.." used!","medium")
-        end
-
-    elseif event=="PLAYER_REGEN_ENABLED" then
-        ShowCombatSummary()
+    end)
+    if not success then
+        print("|cffff0000[MyCombatTextCoachSmart] Error:|r "..tostring(err))
     end
 end)
 
@@ -242,3 +264,13 @@ end)
 -- Periodic Smart Coach Evaluation
 -- =======================
 C_Timer.NewTicker(10, EvaluateCoach)
+
+-- =======================
+-- Update tracked cooldowns if player changes spec
+-- =======================
+f:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+f:SetScript("OnEvent", function(self, event, ...)
+    if event=="PLAYER_SPECIALIZATION_CHANGED" then
+        UpdateTrackedCooldowns()
+    end
+end)
