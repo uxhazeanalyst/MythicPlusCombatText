@@ -1,5 +1,12 @@
 -- ########################################################
 -- MyCombatTextCoachSmart_Dungeon
+-- Copyright (c) 2025 YourName
+-- License: Non-commercial personal use only
+-- ########################################################
+
+
+-- ########################################################
+-- MyCombatTextCoachSmart_Dungeon
 -- Multi-School Combat Text + Class/Spec Cooldowns + Smart Coaching + Dungeon-Wide Logging + Mythic+ Progress
 -- ########################################################
 
