@@ -2,7 +2,10 @@
 -- MyCombatTextCoachSmart_Dungeon
 -- Copyright (c) 2025 YourName
 -- License: Non-commercial personal use only
+-- You may not redistribute, sell, or use this addon commercially
+-- without explicit permission.
 -- ########################################################
+
 
 
 -- ########################################################
