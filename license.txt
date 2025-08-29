@@ -1,0 +1,13 @@
+MyCombatTextCoachSmart_Dungeon
+Copyright (c) 2025 YourName
+
+Permission is granted to use this addon for personal, non-commercial purposes only.
+You may use, modify, or run this addon for your own gameplay.
+
+Restrictions:
+1. You may not redistribute, sell, or sublicense this addon or any modified versions without explicit permission from the author.
+2. You may not use this addon or derivative works for commercial purposes.
+3. You must retain this copyright and license notice in any copies or derivative works.
+
+Disclaimer:
+This addon is provided "as-is", without warranty of any kind. The author is not responsible for any damage, errors, or issues arising from its use.
