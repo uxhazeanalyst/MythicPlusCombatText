@@ -1,6 +1,6 @@
 -- ########################################################
 -- MyCombatTextCoachSmart_Dungeon
--- Multi-School Combat Text + Class/Spec Cooldowns + Smart Coaching + Dungeon-Wide Logging
+-- Multi-School Combat Text + Class/Spec Cooldowns + Smart Coaching + Dungeon-Wide Logging + Mythic+ Progress
 -- ########################################################
 
 local f = CreateFrame("Frame")
@@ -9,6 +9,7 @@ f:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 f:RegisterEvent("PLAYER_REGEN_ENABLED")
 f:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 f:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+f:RegisterEvent("UNIT_DIED")
 
 -- =======================
 -- Color Helper
@@ -19,49 +20,30 @@ end
 
 local function ShowCombatText(msg, isCrit)
     if not CombatText_AddMessage then return end
+    local size = MyCombatTextOptions:GetTextSize() or 16
     CombatText_AddMessage(msg, CombatText_StandardScroll, 1,1,1, isCrit and "crit" or nil, false)
 end
 
 -- =======================
--- Colors
--- =======================
-local COLORS = {
-    physical = {r=1, g=0, b=0},
-    holy     = {r=1, g=0.9, b=0.5},
-    fire     = {r=1, g=0.3, b=0},
-    nature   = {r=0.2, g=1, b=0.2},
-    frost    = {r=0.5, g=0.8, b=1},
-    shadow   = {r=0.6, g=0.4, b=0.8},
-    arcane   = {r=0.6, g=0.8, b=1},
-    dodge    = {r=1, g=1, b=0},
-    parry    = {r=0, g=1, b=1},
-    absorb   = {r=0, g=1, b=0},
-    miss     = {r=0.7, g=0.7, b=0.7},
-    block    = {r=0.6, g=0.4, b=1},
-    magical  = {r=0.6, g=0.8, b=1},
-    coach    = {r=1, g=0.66, b=0},
-}
-
--- =======================
--- School Mapping
+-- Colors & School Mapping
 -- =======================
 local SCHOOL_MASKS = {
-    [1] = {"Physical", COLORS.physical},
-    [2] = {"Holy", COLORS.holy},
-    [4] = {"Fire", COLORS.fire},
-    [8] = {"Nature", COLORS.nature},
-    [16] = {"Frost", COLORS.frost},
-    [32] = {"Shadow", COLORS.shadow},
-    [64] = {"Arcane", COLORS.arcane},
+    [1] = {"Physical", "physical"},
+    [2] = {"Holy", "holy"},
+    [4] = {"Fire", "fire"},
+    [8] = {"Nature", "nature"},
+    [16] = {"Frost", "frost"},
+    [32] = {"Shadow", "shadow"},
+    [64] = {"Arcane", "arcane"},
 }
 
 local FIXED_ORDER = {2,4,8,16,32,64} -- Holy → Fire → Nature → Frost → Shadow → Arcane
 
 local function GetSchoolTags(school)
     if not school or school == 1 then
-        return {{"Physical", COLORS.physical}}
+        return {{"Physical", "physical"}}
     end
-    local tags = {{"[Magical]", COLORS.magical}}
+    local tags = {{"[Magical]", "magical"}}
     for _, bit in ipairs(FIXED_ORDER) do
         if bit.band(school, bit) ~= 0 then
             local info = SCHOOL_MASKS[bit]
@@ -85,9 +67,6 @@ local combatStats = {
     cooldownsUsed = {},
 }
 
--- =======================
--- Full Dungeon Log
--- =======================
 local fullCombatLog = {}
 
 -- =======================
@@ -111,21 +90,33 @@ local function UpdateTrackedCooldowns()
         end
     end
 end
-
--- Call once at load
 UpdateTrackedCooldowns()
+
+-- =======================
+-- Mythic+ Progress
+-- =======================
+local mythicProgress = 0       -- running total
+local dungeonTotalWeight = 100 -- approximate total dungeon weight
+
+local function GetMobValue(destGUID)
+    -- Default: normal mob = 3, boss = 10 (can refine using UnitClassification/NPC ID)
+    local value = 3
+    return value
+end
 
 -- =======================
 -- Coaching Functions
 -- =======================
 local function PrintCoachAdvice(msg, priority)
-    local color = COLORS.coach
+    if not MyCombatTextOptions:IsSmartCoachEnabled() then return end
+    local color = MyCombatTextOptions:GetColor("coach")
     if priority=="high" then color={r=1,g=0.44,b=0.27}
     elseif priority=="low" then color={r=0.66,g=0.66,b=1} end
     ShowCombatText(Colorize("[Coach] "..msg, color))
 end
 
 local function EvaluateCoach()
+    if not MyCombatTextOptions:IsSmartCoachEnabled() then return end
     local mitigation = 0
     if combatStats.totalDamageTaken>0 then
         mitigation = (combatStats.blocked + combatStats.absorbed)/combatStats.totalDamageTaken*100
@@ -150,6 +141,8 @@ end
 -- Post-Combat Summary
 -- =======================
 local function ShowCombatSummary()
+    if not MyCombatTextOptions:IsCombatSummaryEnabled() then return end
+
     local totalDamage = combatStats.totalDamageTaken
     local absorbedPct = totalDamage > 0 and (combatStats.absorbed / totalDamage * 100) or 0
     local blockedPct  = totalDamage > 0 and (combatStats.blocked / totalDamage * 100) or 0
@@ -171,16 +164,15 @@ local function ShowCombatSummary()
     ShowCombatText("Cooldowns Missed: "..missedCooldownsText)
 
     if absorbedPct < 20 then
-        ShowCombatText("[Coach] Consider improving absorption through shields or defensive abilities.")
+        PrintCoachAdvice("Consider improving absorption through shields or defensive abilities.", "high")
     end
     if blockedPct < 20 then
-        ShowCombatText("[Coach] Increase block effectiveness, timing defensive cooldowns better.")
+        PrintCoachAdvice("Increase block effectiveness, timing defensive cooldowns better.", "high")
     end
     if parryRate < 10 then
-        ShowCombatText("[Coach] Parry rate low — consider stats or defensive timing.")
+        PrintCoachAdvice("Parry rate low — consider stats or defensive timing.", "medium")
     end
 
-    -- Reset stats for next combat
     for k,_ in pairs(combatStats) do
         if k~="cooldownsUsed" then combatStats[k]=0 end
     end
@@ -191,6 +183,8 @@ end
 -- Full Dungeon Summary
 -- =======================
 local function PrintDungeonSummary()
+    if not MyCombatTextOptions:IsDungeonSummaryEnabled() then return end
+
     local totalDamage = 0
     local totalBlocked = 0
     local totalAbsorbed = 0
@@ -215,12 +209,11 @@ local function PrintDungeonSummary()
     ShowCombatText("Parried: "..totalParried)
     ShowCombatText("Missed: "..totalMissed)
 
-    -- Smart advice
     if totalBlocked / totalDamage < 0.2 then
-        ShowCombatText("[Coach] Increase block stats and timing of defensive cooldowns!")
+        PrintCoachAdvice("Increase block stats and timing of defensive cooldowns!", "high")
     end
     if totalAbsorbed / totalDamage < 0.2 then
-        ShowCombatText("[Coach] Improve absorption via shields or defensive abilities!")
+        PrintCoachAdvice("Improve absorption via shields or defensive abilities!", "high")
     end
 end
 
@@ -229,6 +222,7 @@ end
 -- =======================
 f:SetScript("OnEvent", function(self, event, ...)
     local success, err = pcall(function()
+        -- === Combat Log ===
         if event=="COMBAT_LOG_EVENT_UNFILTERED" then
             local _, subEvent, _, _, _, _, _, _, _, _,
                   _, spellID, spellName, _, amount, _, school, _, blocked, absorbed, critical, glancing, crushing, isOffHand, missType = CombatLogGetCurrentEventInfo()
@@ -244,9 +238,10 @@ f:SetScript("OnEvent", function(self, event, ...)
             local msg, isCrit = nil, false
 
             if subEvent=="SWING_DAMAGE" then
-                msg = Colorize(string.format("-%d (Physical)", amount), COLORS.physical)
-                if blocked>0 then msg = msg.." "..Colorize("[Blocked "..blocked.."]", COLORS.block) end
-                if absorbed>0 then msg = msg.." "..Colorize("[Absorbed "..absorbed.."]", COLORS.absorb) end
+                local color = MyCombatTextOptions:GetColor("physical")
+                msg = Colorize(string.format("-%d (Physical)", amount), color)
+                if blocked>0 then msg = msg.." "..Colorize("[Blocked "..blocked.."]", MyCombatTextOptions:GetColor("block")) end
+                if absorbed>0 then msg = msg.." "..Colorize("[Absorbed "..absorbed.."]", MyCombatTextOptions:GetColor("absorb")) end
                 if critical then isCrit=true end
                 combatStats.totalDamageTaken = combatStats.totalDamageTaken + amount
                 combatStats.blocked = combatStats.blocked + blocked
@@ -257,17 +252,19 @@ f:SetScript("OnEvent", function(self, event, ...)
                 local schoolTags = GetSchoolTags(school)
                 local spellText = string.format("-%d (%s)", amount, spellName)
                 local magicalTag = ""
-                if #schoolTags>0 and schoolTags[1][1]=="[Magical]" then
-                    magicalTag = Colorize(schoolTags[1][1], schoolTags[1][2])
+                if MyCombatTextOptions:IsMultiSchoolTagsEnabled() and #schoolTags>0 and schoolTags[1][1]=="[Magical]" then
+                    magicalTag = Colorize(schoolTags[1][1], MyCombatTextOptions:GetColor("magical"))
                 end
                 local elementTags=""
-                for i=2,#schoolTags do
-                    elementTags = elementTags.." "..Colorize(schoolTags[i][1], schoolTags[i][2])
+                if MyCombatTextOptions:IsMultiSchoolTagsEnabled() then
+                    for i=2,#schoolTags do
+                        elementTags = elementTags.." "..Colorize(schoolTags[i][1], MyCombatTextOptions:GetColor(schoolTags[i][2]))
+                    end
                 end
                 local modifiers=""
-                if blocked>0 then modifiers = modifiers.." "..Colorize("[Blocked "..blocked.."]", COLORS.block) end
-                if absorbed>0 then modifiers = modifiers.." "..Colorize("[Absorbed "..absorbed.."]", COLORS.absorb) end
-                msg = Colorize(spellText, schoolTags[2] and schoolTags[2][2] or COLORS.magical).." "..magicalTag..elementTags..modifiers
+                if blocked>0 then modifiers = modifiers.." "..Colorize("[Blocked "..blocked.."]", MyCombatTextOptions:GetColor("block")) end
+                if absorbed>0 then modifiers = modifiers.." "..Colorize("[Absorbed "..absorbed.."]", MyCombatTextOptions:GetColor("absorb")) end
+                msg = Colorize(spellText, schoolTags[2] and MyCombatTextOptions:GetColor(schoolTags[2][2]) or MyCombatTextOptions:GetColor("magical")).." "..magicalTag..elementTags..modifiers
                 if critical then isCrit=true end
                 combatStats.totalDamageTaken = combatStats.totalDamageTaken + amount
                 combatStats.blocked = combatStats.blocked + blocked
@@ -276,15 +273,14 @@ f:SetScript("OnEvent", function(self, event, ...)
             end
 
             if subEvent=="SWING_MISSED" or subEvent=="SPELL_MISSED" or subEvent=="RANGE_MISSED" then
-                if missType=="DODGE" then combatStats.dodged=combatStats.dodged+1; msg=Colorize("Dodged",COLORS.dodge)
-                elseif missType=="PARRY" then combatStats.parried=combatStats.parried+1; msg=Colorize("Parried",COLORS.parry)
-                elseif missType=="MISS" then combatStats.missed=combatStats.missed+1; msg=Colorize("Missed",COLORS.miss)
-                elseif missType=="ABSORB" then combatStats.absorbed=combatStats.absorbed+amount; msg=Colorize("Absorbed",COLORS.absorb)
-                elseif missType=="BLOCK" then combatStats.blocked=combatStats.blocked+amount; msg=Colorize("Blocked",COLORS.block)
+                if missType=="DODGE" then combatStats.dodged=combatStats.dodged+1; msg=Colorize("Dodged",MyCombatTextOptions:GetColor("dodge"))
+                elseif missType=="PARRY" then combatStats.parried=combatStats.parried+1; msg=Colorize("Parried",MyCombatTextOptions:GetColor("parry"))
+                elseif missType=="MISS" then combatStats.missed=combatStats.missed+1; msg=Colorize("Missed",MyCombatTextOptions:GetColor("miss"))
+                elseif missType=="ABSORB" then combatStats.absorbed=combatStats.absorbed+amount; msg=Colorize("Absorbed",MyCombatTextOptions:GetColor("absorb"))
+                elseif missType=="BLOCK" then combatStats.blocked=combatStats.blocked+amount; msg=Colorize("Blocked",MyCombatTextOptions:GetColor("block"))
                 end
             end
 
-            -- Display and log
             if msg then
                 ShowCombatText(msg,isCrit)
                 table.insert(fullCombatLog, {
@@ -300,8 +296,9 @@ f:SetScript("OnEvent", function(self, event, ...)
                 })
             end
 
-            if math.random()<0.05 then EvaluateCoach() end
+            if MyCombatTextOptions:IsSmartCoachEnabled() and math.random()<0.05 then EvaluateCoach() end
 
+        -- === Unit Spell Cast ===
         elseif event=="UNIT_SPELLCAST_SUCCEEDED" then
             local unit, spellNameCast = ...
             if unit=="player" and trackedCooldowns[spellNameCast] then
@@ -310,23 +307,30 @@ f:SetScript("OnEvent", function(self, event, ...)
                 PrintCoachAdvice(spellNameCast.." used!","medium")
             end
 
+        -- === Player Leaves Combat ===
         elseif event=="PLAYER_REGEN_ENABLED" then
             ShowCombatSummary()
 
+        -- === Dungeon Completed ===
         elseif event=="CHALLENGE_MODE_COMPLETED" then
             PrintDungeonSummary()
             fullCombatLog = {}
+            mythicProgress = 0
 
+        -- === Player Spec Changed ===
         elseif event=="PLAYER_SPECIALIZATION_CHANGED" then
             UpdateTrackedCooldowns()
+
+        -- === Mob Killed ===
+        elseif event=="UNIT_DIED" then
+            local destGUID, destName = ...
+            local value = GetMobValue(destGUID)
+            mythicProgress = mythicProgress + value
+            ShowCombatText(Colorize("["..value.." Mythic Mob]", MyCombatTextOptions:GetColor("coach")))
+            local percentDone = math.min(100, (mythicProgress / dungeonTotalWeight) * 100)
+            ShowCombatText(Colorize(string.format("Dungeon Progress: %.1f%%", percentDone), MyCombatTextOptions:GetColor("coach")))
         end
     end)
     if not success then
         print("|cffff0000[MyCombatTextCoachSmart] Error:|r "..tostring(err))
     end
-end)
-
--- =======================
--- Periodic Smart Coach Evaluation
--- =======================
-C_Timer.NewTicker(10, EvaluateCoach)
