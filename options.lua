@@ -12,7 +12,14 @@ Options.defaults = {
     textSize = 16,
     colors = {
         physical = {r=1, g=0, b=0},
-        magical  = {r=0.6, g=0.8, b=1},
+        holy     = {r=1, g=0.9, b=0.5},
+        fire     = {r=1, g=0.3, b=0},
+        nature   = {r=0.6, g=0.9, b=0.2},
+        frost    = {r=0.5, g=0.8, b=1},
+        shadow   = {r=0.4, g=0, b=0.6},
+        arcane   = {r=0.7, g=0.3, b=0.9},
+        bleed    = {r=0.8, g=0.1, b=0.1},
+
         dodge    = {r=1, g=1, b=0},
         parry    = {r=0, g=1, b=1},
         absorb   = {r=0, g=1, b=0},
@@ -31,27 +38,24 @@ Options.defaults = {
 -- =======================
 Options.settings = {}
 
-if MyCombatTextCharDB then
-    for k,v in pairs(Options.defaults) do
-        if type(v)=="table" then
-            Options.settings[k] = {}
-            for key,val in pairs(v) do
-                Options.settings[k][key] = MyCombatTextCharDB[k] and MyCombatTextCharDB[k][key] or val
+local function LoadSettings()
+    if MyCombatTextCharDB then
+        for k,v in pairs(Options.defaults) do
+            if type(v)=="table" then
+                Options.settings[k] = {}
+                for key,val in pairs(v) do
+                    if type(val)=="table" then
+                        Options.settings[k][key] = MyCombatTextCharDB[k] and MyCombatTextCharDB[k][key] or val
+                    else
+                        Options.settings[k][key] = (MyCombatTextCharDB[k] and MyCombatTextCharDB[k][key]) or val
+                    end
+                end
+            else
+                Options.settings[k] = (MyCombatTextCharDB[k] ~= nil and MyCombatTextCharDB[k]) or v
             end
-        else
-            Options.settings[k] = MyCombatTextCharDB[k] ~= nil and MyCombatTextCharDB[k] or v
         end
-    end
-else
-    for k,v in pairs(Options.defaults) do
-        if type(v)=="table" then
-            Options.settings[k]={}
-            for key,val in pairs(v) do
-                Options.settings[k][key]=val
-            end
-        else
-            Options.settings[k]=v
-        end
+    else
+        Options:ResetToDefaults()
     end
 end
 
@@ -63,18 +67,22 @@ end
 -- Setters / Getters
 -- =======================
 function Options:SetColor(eventType,r,g,b)
+    eventType = eventType:lower()
     if self.settings.colors[eventType] then
-        self.settings.colors[eventType]={r=r,g=g,b=b}
+        self.settings.colors[eventType] = {r=r,g=g,b=b}
         SaveSettings()
+    else
+        print("Unknown eventType:", eventType)
     end
 end
+
 function Options:SetTextSize(size) self.settings.textSize=size; SaveSettings() end
 function Options:ToggleMultiSchoolTags(state) self.settings.showMultiSchoolTags=state; SaveSettings() end
 function Options:ToggleCombatSummary(state) self.settings.showCombatSummary=state; SaveSettings() end
 function Options:ToggleDungeonSummary(state) self.settings.showDungeonSummary=state; SaveSettings() end
 function Options:ToggleSmartCoach(state) self.settings.enableSmartCoach=state; SaveSettings() end
 
-function Options:GetColor(eventType) return self.settings.colors[eventType] or {r=1,g=1,b=1} end
+function Options:GetColor(eventType) return self.settings.colors[eventType:lower()] or {r=1,g=1,b=1} end
 function Options:GetTextSize() return self.settings.textSize end
 function Options:IsMultiSchoolTagsEnabled() return self.settings.showMultiSchoolTags end
 function Options:IsCombatSummaryEnabled() return self.settings.showCombatSummary end
@@ -85,13 +93,22 @@ function Options:IsSmartCoachEnabled() return self.settings.enableSmartCoach end
 -- Reset
 -- =======================
 function Options:ResetToDefaults()
+    self.settings = {}
     for k,v in pairs(Options.defaults) do
         if type(v)=="table" then
+            self.settings[k] = {}
             for key,val in pairs(v) do
-                self.settings[k][key]=val
+                if type(val)=="table" then
+                    self.settings[k][key] = {}
+                    for subk,subv in pairs(val) do
+                        self.settings[k][key][subk] = subv
+                    end
+                else
+                    self.settings[k][key] = val
+                end
             end
         else
-            self.settings[k]=v
+            self.settings[k] = v
         end
     end
     SaveSettings()
@@ -104,11 +121,11 @@ local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
 local function base64enc(data)
     return ((data:gsub('.', function(x) 
-        local r,bits='',x:byte()
-        for i=8,1,-1 do r=r..(bits%2^i-bits%2^(i-1)>0 and '1' or '0') end
-        return r;
+        local r,byte='',x:byte()
+        for i=8,1,-1 do r=r..(byte%2^i-byte%2^(i-1)>0 and '1' or '0') end
+        return r
     end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
-        if (#x < 6) then return '' end
+        if #x < 6 then return '' end
         local c=0
         for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
         return b:sub(c+1,c+1)
@@ -118,12 +135,12 @@ end
 local function base64dec(data)
     data = data:gsub('[^'..b..'=]', '')
     return (data:gsub('.', function(x)
-        if (x == '=') then return '' end
+        if x == '=' then return '' end
         local r,f='',(b:find(x)-1)
         for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
-        return r;
+        return r
     end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
-        if (#x ~= 8) then return '' end
+        if #x ~= 8 then return '' end
         local c=0
         for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end
         return string.char(c)
@@ -170,7 +187,7 @@ function Options:Import(str)
     local decoded = base64dec(str)
     local tbl, err = Deserialize(decoded)
     if not tbl then
-        print("Import failed: "..err)
+        print("Import failed: "..(err or "unknown error"))
         return
     end
     self.settings = tbl
@@ -186,11 +203,15 @@ SLASH_MYCOMBATTEXT2="/combattext"
 SlashCmdList["MYCOMBATTEXT"]=function(msg)
     local cmd, rest = msg:match("^(%S*)%s*(.-)$")
     cmd=cmd:lower()
-    if cmd=="size" and tonumber(rest) then Options:SetTextSize(tonumber(rest))
+    if cmd=="size" and tonumber(rest) then
+        Options:SetTextSize(tonumber(rest))
+        print("Text size set to "..rest)
     elseif cmd=="colors" then
         local typeName,r,g,b=rest:match("^(%S+)%s+(%d+%.?%d*)%s+(%d+%.?%d*)%s+(%d+%.?%d*)$")
-        r,g,b=tonumber(r),tonumber(g),tonumber(b)
-        if typeName and r and g and b then Options:SetColor(typeName,r,g,b) end
+        if typeName and r and g and b then
+            Options:SetColor(typeName,tonumber(r),tonumber(g),tonumber(b))
+            print("Set "..typeName.." color to",r,g,b)
+        end
     elseif cmd=="multischool" then Options:ToggleMultiSchoolTags(rest=="on")
     elseif cmd=="combat" then Options:ToggleCombatSummary(rest=="on")
     elseif cmd=="dungeon" then Options:ToggleDungeonSummary(rest=="on")
@@ -203,6 +224,7 @@ SlashCmdList["MYCOMBATTEXT"]=function(msg)
         print("Usage: /mcts size <num>, colors <type> <r> <g> <b>, multischool on/off, combat on/off, dungeon on/off, coach on/off, reset, export, import <string>")
     end
 end
+
 -- =======================
 -- Share (Popup EditBox)
 -- =======================
@@ -232,6 +254,7 @@ function Options:Share()
 end
 
 -- =======================
--- Global
+-- Init
 -- =======================
+LoadSettings()
 MyCombatTextOptions=Options
