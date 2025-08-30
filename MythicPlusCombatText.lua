@@ -263,6 +263,62 @@ local function PrintDungeonSummary()
     ShowFloating(Colorize("Missed: "..totalMissed, SafeGetOptionColor("miss")))
     ShowFloating(Colorize("Damage Dealt: "..totalDealt, SafeGetOptionColor("magical")))
 end
+HEALER_COACH = {
+    PRIEST = {
+        HOLY = {
+            aoe_threshold = 50000, -- damage in <4s
+            st_threshold  = 20000, -- tank intake in <3s
+            aoe_suggestions = {"Divine Hymn", "Holy Word: Salvation", "Prayer of Healing"},
+            st_suggestions  = {"Guardian Spirit", "Holy Word: Serenity"},
+        },
+        DISCIPLINE = {
+            aoe_threshold = 40000,
+            st_threshold  = 18000,
+            aoe_suggestions = {"Evangelism", "Barrier", "Rapture"},
+            st_suggestions  = {"Pain Suppression", "Penance"},
+        },
+    },
+    SHAMAN = {
+        RESTORATION = {
+            aoe_threshold = 60000,
+            st_threshold  = 22000,
+            aoe_suggestions = {"Spirit Link Totem", "Healing Tide Totem", "Ascendance"},
+            st_suggestions  = {"Riptide", "Earth Shield", "Unleash Life"},
+        },
+    },
+    DRUID = {
+        RESTORATION = {
+            aoe_threshold = 55000,
+            st_threshold  = 20000,
+            aoe_suggestions = {"Tranquility", "Flourish", "Wild Growth"},
+            st_suggestions  = {"Ironbark", "Swiftmend"},
+        },
+    },
+    PALADIN = {
+        HOLY = {
+            aoe_threshold = 50000,
+            st_threshold  = 25000,
+            aoe_suggestions = {"Aura Mastery", "Avenging Wrath", "Light of Dawn"},
+            st_suggestions  = {"Blessing of Sacrifice", "Word of Glory"},
+        },
+    },
+    EVOKER = {
+        PRESERVATION = {
+            aoe_threshold = 55000,
+            st_threshold  = 23000,
+            aoe_suggestions = {"Rewind", "Dream Breath", "Emerald Communion"},
+            st_suggestions  = {"Time Dilation", "Verdant Embrace"},
+        },
+    },
+    MONK = {
+        MISTWEAVER = {
+            aoe_threshold = 50000,
+            st_threshold  = 20000,
+            aoe_suggestions = {"Revival", "Yu’lon’s Whisper", "Essence Font"},
+            st_suggestions  = {"Life Cocoon", "Enveloping Mist"},
+        },
+    },
+}
 
 -- =======================
 -- Event hookup
