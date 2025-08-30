@@ -32,6 +32,17 @@ local COLORS = {
     magical  = {r=0.6, g=0.8, b=1},  -- Generic magical
     coach    = {r=1, g=0.66, b=0},   -- Orange coach tips
 }
+-- =======================
+-- WoW Class Colors
+-- =======================
+local CLASS_COLORS = {
+    DRUID     = {r=1.0, g=0.49, b=0.04},   -- Orange
+    MONK      = {r=0.0, g=1.0, b=0.59},    -- Teal
+    SHAMAN    = {r=0.0, g=0.44, b=0.87},   -- Blue
+    PRIEST    = {r=1.0, g=1.0, b=1.0},     -- White
+    PALADIN   = {r=0.96, g=0.55, b=0.73},  -- Pink
+    EVOKER    = {r=0.20, g=0.58, b=0.50},  -- Jade Green
+}
 
 -- =======================
 -- School / mask mapping
