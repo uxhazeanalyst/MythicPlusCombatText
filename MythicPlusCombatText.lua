@@ -319,6 +319,86 @@ HEALER_COACH = {
         },
     },
 }
+-- Healing Coach Prototype
+
+local f = CreateFrame("Frame")
+f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+f:RegisterEvent("PLAYER_REGEN_ENABLED")
+
+local damageLog = {}
+local lastCombat = {}
+
+local function LogDamage(dstGUID, amount, school)
+    local now = GetTime()
+    damageLog[#damageLog+1] = {t=now, target=dstGUID, dmg=amount}
+end
+
+local function Analyze()
+    if not damageLog[1] then return end
+
+    local playerClass, playerSpec = UnitClass("player")
+    local coach = HEALER_COACH[playerClass] and HEALER_COACH[playerClass][playerSpec]
+    if not coach then
+        print("Healing Coach: No profile found for "..playerClass.." spec "..(playerSpec or "?"))
+        return
+    end
+
+    local aoe_total, st_total = 0, 0
+    local tankGUID = UnitGUID("party1") -- crude assumption, can refine with UnitGroupRolesAssigned("unit")
+
+    for _,entry in ipairs(damageLog) do
+        if entry.target == tankGUID then
+            st_total = st_total + entry.dmg
+        else
+            aoe_total = aoe_total + entry.dmg
+        end
+    end
+
+    print("=== Healing Coach Report ===")
+    print("AoE Damage Taken: "..aoe_total)
+    if aoe_total >= coach.aoe_threshold then
+        print("Suggestion: Use one of → "..table.concat(coach.aoe_suggestions, ", "))
+    end
+
+    print("Tank Damage Taken: "..st_total)
+    if st_total >= coach.st_threshold then
+        print("Suggestion: Use one of → "..table.concat(coach.st_suggestions, ", "))
+    end
+
+    wipe(damageLog)
+end
+
+f:SetScript("OnEvent", function(self, event, ...)
+    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        local _, subEvent, _, _, _, _, _, dstGUID, _, _, _, _, spellName, _, _, amount = CombatLogGetCurrentEventInfo()
+        if subEvent == "SWING_DAMAGE" then
+            amount = spellName -- arg mismatch for SWING_DAMAGE
+        end
+        if amount and dstGUID and UnitIsFriend("player", dstGUID) then
+            LogDamage(dstGUID, amount)
+        end
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- end of combat
+        Analyze()
+    end
+end)
+local lastAlert = 0
+local function Alert(msg)
+    if GetTime() - lastAlert > 5 then -- throttle to avoid spam
+        CombatText_AddMessage("|cff00ff00Healing Coach:|r "..msg, CombatText_StandardScroll, 0,1,0)
+        lastAlert = GetTime()
+    end
+end
+
+-- inside damage logging:
+if st_burst > coach.st_threshold then
+    local spell = coach.st_suggestions[math.random(#coach.st_suggestions)]
+    Alert("Tank burst! Consider: "..spell)
+end
+if aoe_burst > coach.aoe_threshold then
+    local spell = coach.aoe_suggestions[math.random(#coach.aoe_suggestions)]
+    Alert("Group AoE! Try: "..spell)
+end
 
 -- =======================
 -- Event hookup
