@@ -92,4 +92,9 @@ For questions, suggestions, or bug reports, contact **YourName** or open an issu
 
 /mcts share              → Export your settings as a Base64 string
 
+/mcts healer on/off      → Toggle smart coaching healing advice
+
+/mcts healersum on/off    → Toggle end-of-combat healing summaries
+
+
 /mcts import <string>    → Import settings from a Base64 string
