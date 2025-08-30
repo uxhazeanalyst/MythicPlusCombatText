@@ -405,6 +405,15 @@ local function Alert(msg)
         lastAlert = GetTime()
     end
 end
+local function ShowHealerSummary(aoeTotal, stTotal)
+    if not MyCombatTextOptions:IsHealerSummaryEnabled() then return end
+
+    print("|cffffcc00=== Healing Coach Report ===|r")
+    print("AoE Damage Taken: "..aoeTotal)
+    print("Suggested CDs: Spirit Link, Revival, Barrier")
+    print("Tank Damage Taken: "..stTotal)
+    print("Suggested Tank Heals: Life Cocoon, Pain Suppression")
+end
 
 -- inside damage logging:
 if st_burst > coach.st_threshold then
