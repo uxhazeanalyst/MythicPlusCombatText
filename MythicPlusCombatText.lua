@@ -227,6 +227,11 @@ end
             local schoolTags = GetSchoolTags(spellSchool or 0)
             local mainColor = schoolTags[2] and schoolTags[2][2] or SafeGetOptionColor("magical")
             local magicalTag = (schoolTags[1] and schoolTags[1][1]) and Colorize(schoolTags[1][1], SafeGetOptionColor("magical")) or ""
+            local mainColor = SafeGetOptionColor("magical")
+            if schoolTags[2] and schoolTags[2][2] then
+            mainColor = schoolTags[2][2]
+        end
+
             local elementTags = ""
             for i=2,#schoolTags do elementTags = elementTags.." "..Colorize(schoolTags[i][1], schoolTags[i][2]) end
             local msg = string.format("-%d (%s) %s%s", amount, spellName, magicalTag, elementTags)
@@ -245,6 +250,12 @@ end
                 ShowFloating(Colorize(string.format("-%d (Dot: %s)", amount, spellName), SafeGetOptionColor("magical")), critical)
             end
         elseif sub == "SWING_MISSED" or sub == "SPELL_MISSED" or sub == "RANGE_MISSED" then
+            elseif sub == "SWING_MISSED" then
+    local missType = select(12, CombatLogGetCurrentEventInfo())
+elseif sub == "SPELL_MISSED" or sub == "RANGE_MISSED" then
+    local missType = select(15, CombatLogGetCurrentEventInfo())
+end
+
             local missType = select(21, CombatLogGetCurrentEventInfo()) or ""
             if missType == "DODGE" then combatStats.dodged = combatStats.dodged + 1; ShowFloating(Colorize("Dodged", SafeGetOptionColor("dodge")), false)
             elseif missType == "PARRY" then combatStats.parried = combatStats.parried + 1; ShowFloating(Colorize("Parried", SafeGetOptionColor("parry")), false)
