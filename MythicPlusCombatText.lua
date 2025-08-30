@@ -166,6 +166,11 @@ end
 -- Combat log handler
 -- =======================
 local function HandleCombatLogEvent(...)
+    -- filter events
+if not ShouldProcessCombatEvent(sourceGUID, destGUID) then
+    return
+end
+
     local timestamp, subEvent = select(1, ...)
     -- standard positions for source/dest/spell/amount from CombatLogGetCurrentEventInfo
     -- indexes: 1=time, 2=subEvent, 4=sourceGUID, 5=sourceName, 8=destGUID, 9=destName, 12=spellID, 13=spellName, 14=spellSchool, 15=amount
