@@ -265,6 +265,33 @@ end
         end
     end
 end
+-- =======================
+-- Config toggle
+-- =======================
+local includeWorld = true  -- set to true to also show combat in open world, not just dungeons
+
+-- Helper: check if we're in PvE dungeon/raid
+local function IsInDungeonOrRaid()
+    local inInstance, instanceType = IsInInstance()
+    return (inInstance and (instanceType == "party" or instanceType == "raid"))
+end
+
+-- Wrapper to decide if we should process this combat event
+local function ShouldProcessCombatEvent(sourceGUID, destGUID)
+    -- Always show events involving the player
+    if sourceGUID == playerGUID or destGUID == playerGUID then
+        return true
+    end
+
+    -- If world mode is enabled, also allow NPC vs player in open world
+    if includeWorld and not IsInDungeonOrRaid() then
+        if destGUID == playerGUID then
+            return true
+        end
+    end
+
+    return false
+end
 
 -- =======================
 -- Summaries
