@@ -170,6 +170,27 @@ local function HandleCombatLogEvent(...)
     -- standard positions for source/dest/spell/amount from CombatLogGetCurrentEventInfo
     -- indexes: 1=time, 2=subEvent, 4=sourceGUID, 5=sourceName, 8=destGUID, 9=destName, 12=spellID, 13=spellName, 14=spellSchool, 15=amount
     local _, sub, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellID, spellName, spellSchool, amount, overkill, school, resisted, blocked, absorbed, critical = CombatLogGetCurrentEventInfo()
+    local aoeTotal, stTotal = 0, 0
+local groupSize = GetNumGroupMembers() or 1
+
+local function OnCombatLogEvent()
+    local _, subEvent, _, srcGUID, srcName, _, _, destGUID, destName, _, _, spellID, spellName, _, amount = CombatLogGetCurrentEventInfo()
+    if subEvent ~= "SPELL_DAMAGE" and subEvent ~= "SWING_DAMAGE" then return end
+    if not amount then return end
+
+    -- Tank check
+    if UnitIsUnit(destName, "target") or UnitGroupRolesAssigned(destName) == "TANK" then
+        stTotal = stTotal + amount
+        if amount > 40000 then
+            HealerAlert("Tank burst! "..amount.." dmg → Use PS / Ironbark")
+        end
+    else
+        aoeTotal = aoeTotal + amount
+        if amount > 20000 and groupSize > 2 then
+            HealerAlert("Group AoE hit! "..amount.." dmg → Try Barrier / HTT / Revival")
+        end
+    end
+end
 
     amount = amount or 0
     blocked = blocked or 0
