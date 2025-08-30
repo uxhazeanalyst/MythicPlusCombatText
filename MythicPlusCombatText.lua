@@ -1,40 +1,20 @@
 -- ########################################################
--- MyCombatTextCoachSmart Options
--- Copyright (c) 2025 uxhazeanalyst
--- License: Non-commercial personal use only
--- ########################################################
-
-
--- ########################################################
--- MyCombatTextCoachSmart_Dungeon
--- Multi-School Combat Text + Class/Spec Cooldowns + Smart Coaching + Dungeon-Wide Logging
+-- MythicPlusCombatText.lua
+-- MyCombatTextCoachSmart - corrected, ready-to-paste
+-- Tracks incoming/outgoing damage, bleeds, and per-mob Mythic+ progress
 -- ########################################################
 
 local f = CreateFrame("Frame")
-f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-f:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-f:RegisterEvent("PLAYER_REGEN_ENABLED")
-f:RegisterEvent("CHALLENGE_MODE_COMPLETED")
-f:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+
+-- safe reference to player GUID (update on login/specialization)
+local playerGUID = UnitGUID("player")
 
 -- =======================
--- Color Helper
--- =======================
-local function Colorize(text, color)
-    return string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, text)
-end
-
-local function ShowCombatText(msg, isCrit)
-    if not CombatText_AddMessage then return end
-    CombatText_AddMessage(msg, CombatText_StandardScroll, 1,1,1, isCrit and "crit" or nil, false)
-end
-
--- =======================
--- Colors
+-- Colors (your chosen palette)
 -- =======================
 local COLORS = {
     physical = {r=1, g=0,   b=0},    -- Red
-    bleed    = {r=0.8, g=0, b=0},    -- Darker red for bleed DoTs
+    bleed    = {r=0.8, g=0, b=0},    -- Darker red
     holy     = {r=1, g=0.84, b=0},   -- Gold/Yellow
     fire     = {r=1, g=0,   b=0},    -- Bright Red
     nature   = {r=0.6, g=0.4, b=0.2},-- Brown/Tan
@@ -51,420 +31,274 @@ local COLORS = {
 }
 
 -- =======================
--- School Mapping
+-- School / mask mapping
 -- =======================
 local SCHOOL_MASKS = {
-    [1] = {"Physical", COLORS.physical},
-    [2] = {"Holy", COLORS.holy},
-    [4] = {"Fire", COLORS.fire},
-    [8] = {"Nature", COLORS.nature},
-    [16] = {"Frost", COLORS.frost},
-    [32] = {"Shadow", COLORS.shadow},
-    [64] = {"Arcane", COLORS.arcane},
+    [1]  = {"Physical", COLORS.physical},
+    [2]  = {"Holy",     COLORS.holy},
+    [4]  = {"Fire",     COLORS.fire},
+    [8]  = {"Nature",   COLORS.nature},
+    [16] = {"Frost",    COLORS.frost},
+    [32] = {"Shadow",   COLORS.shadow},
+    [64] = {"Arcane",   COLORS.arcane},
 }
+local FIXED_ORDER = {2,4,8,16,32,64} -- order for multi-school tags
 
-local FIXED_ORDER = {2,4,8,16,32,64} -- Holy → Fire → Nature → Frost → Shadow → Arcane
+-- safe bit-band function (works with bit or bit32)
+local band = (bit and bit.band) or (bit32 and bit32.band) or function(a,b) return (a % (2*b)) >= b and 1 or 0 end
 
 local function GetSchoolTags(school)
     if not school or school == 1 then
-        return {{"Physical", COLORS.physical}}
+        return { { "Physical", COLORS.physical } }
     end
-    local tags = {{"[Magical]", COLORS.magical}}
-    for _, bit in ipairs(FIXED_ORDER) do
-        if bit.band(school, bit) ~= 0 then
-            local info = SCHOOL_MASKS[bit]
-            table.insert(tags, {info[1], info[2]})
+    local tags = { { "[Magical]", COLORS.magical } }
+    for _, mask in ipairs(FIXED_ORDER) do
+        if band(school, mask) ~= 0 then
+            local info = SCHOOL_MASKS[mask]
+            if info then
+                table.insert(tags, { info[1], info[2] })
+            end
         end
     end
     return tags
 end
 
 -- =======================
--- Combat Stats
+-- Bleed spell list (extendable)
+-- Put spellIDs you want highlighted as Bleed
+-- =======================
+local BLEED_SPELLS = {
+    [772]    = true,  -- example: Rend (Warrior; ID must be verified for your expansion)
+    [1943]   = true,  -- Rupture (Rogue)
+    [1079]   = true,  -- Rip (Druid)
+    -- Add more spellIDs here (update with correct IDs for your expansion)
+}
+
+-- =======================
+-- Small helpers
+-- =======================
+local function Colorize(text, color)
+    if not color then return text end
+    return string.format("|cff%02x%02x%02x%s|r", math.floor(color.r*255), math.floor(color.g*255), math.floor(color.b*255), text)
+end
+
+local function SafeGetOptionColor(key)
+    if MyCombatTextOptions and MyCombatTextOptions.GetColor then
+        return MyCombatTextOptions:GetColor(key) or COLORS[key] or {r=1,g=1,b=1}
+    end
+    return COLORS[key] or {r=1,g=1,b=1}
+end
+
+local function ShowFloating(msg, isCrit)
+    if not CombatText_AddMessage then return end
+    -- Use color codes in msg (Colorize) so we can pass white to API
+    CombatText_AddMessage(msg, CombatText_StandardScroll, 1,1,1, isCrit and "crit" or nil, false)
+end
+
+-- =======================
+-- Combat stats
 -- =======================
 local combatStats = {
-    totalDamageTaken = 0,
-    blocked = 0,
+    taken = 0,
+    dealt = 0,
     absorbed = 0,
+    blocked = 0,
     parried = 0,
     dodged = 0,
     missed = 0,
-    criticalsReceived = 0,
     cooldownsUsed = {},
 }
-
--- =======================
--- Full Dungeon Log
--- =======================
 local fullCombatLog = {}
 
 -- =======================
--- Class/Spec Cooldowns
+-- Mythic+ forces tracking
 -- =======================
-local classCooldowns = {
-    WARRIOR = {"Shield Wall", "Last Stand", "Rallying Cry"},
-    DRUID   = {"Barkskin", "Ironfur", "Survival Instincts"},
-    MAGE    = {"Ice Block"},
-    PALADIN = {"Divine Shield", "Guardian of Ancient Kings"},
-    DEATHKNIGHT = {"Anti-Magic Shell", "Icebound Fortitude"},
-}
-
-local trackedCooldowns = {}
-local function UpdateTrackedCooldowns()
-    trackedCooldowns = {}
-    local _, playerClass = UnitClass("player")
-    if classCooldowns[playerClass] then
-        for _, spellName in ipairs(classCooldowns[playerClass]) do
-            trackedCooldowns[spellName] = true
-        end
-    end
-end
-
--- Call once at load
-UpdateTrackedCooldowns()
-
--- =======================
--- Coaching Functions
--- =======================
-local function PrintCoachAdvice(msg, priority)
-    local color = COLORS.coach
-    if priority=="high" then color={r=1,g=0.44,b=0.27}
-    elseif priority=="low" then color={r=0.66,g=0.66,b=1} end
-    ShowCombatText(Colorize("[Coach] "..msg, color))
-end
-
-local function EvaluateCoach()
-    local mitigation = 0
-    if combatStats.totalDamageTaken>0 then
-        mitigation = (combatStats.blocked + combatStats.absorbed)/combatStats.totalDamageTaken*100
-    end
-
-    if mitigation<20 then
-        PrintCoachAdvice("Mitigation low! Use defensive cooldowns more efficiently.", "high")
-    elseif mitigation<50 then
-        PrintCoachAdvice("Good mitigation, room to improve timing.", "medium")
-    else
-        PrintCoachAdvice("Excellent mitigation this pull!", "low")
-    end
-
-    for spell, _ in pairs(trackedCooldowns) do
-        if not combatStats.cooldownsUsed[spell] or #combatStats.cooldownsUsed[spell]==0 then
-            PrintCoachAdvice(spell.." not used! Consider using during high-damage phases.", "high")
-        end
-    end
-end
-
--- =======================
--- Post-Combat Summary
--- =======================
-local function ShowCombatSummary()
-    local totalDamage = combatStats.totalDamageTaken
-    local absorbedPct = totalDamage > 0 and (combatStats.absorbed / totalDamage * 100) or 0
-    local blockedPct  = totalDamage > 0 and (combatStats.blocked / totalDamage * 100) or 0
-    local parryRate   = (combatStats.parried + combatStats.dodged + combatStats.missed) > 0 and
-                        (combatStats.parried / (combatStats.parried + combatStats.dodged + combatStats.missed) * 100) or 0
-
-    local missedCooldowns = {}
-    for spell,_ in pairs(trackedCooldowns) do
-        if not combatStats.cooldownsUsed[spell] or #combatStats.cooldownsUsed[spell]==0 then
-            table.insert(missedCooldowns, spell)
-        end
-    end
-    local missedCooldownsText = #missedCooldowns>0 and table.concat(missedCooldowns, ", ") or "None"
-
-    ShowCombatText("===== Combat Summary =====")
-    ShowCombatText(string.format("Absorbed: %d (%.1f%%)", combatStats.absorbed, absorbedPct))
-    ShowCombatText(string.format("Blocked: %d (%.1f%%)", combatStats.blocked, blockedPct))
-    ShowCombatText(string.format("Parry Rate: %.1f%%", parryRate))
-    ShowCombatText("Cooldowns Missed: "..missedCooldownsText)
-
-    if absorbedPct < 20 then
-        ShowCombatText("[Coach] Consider improving absorption through shields or defensive abilities.")
-    end
-    if blockedPct < 20 then
-        ShowCombatText("[Coach] Increase block effectiveness, timing defensive cooldowns better.")
-    end
-    if parryRate < 10 then
-        ShowCombatText("[Coach] Parry rate low — consider stats or defensive timing.")
-    end
-
-    -- Reset stats for next combat
-    for k,_ in pairs(combatStats) do
-        if k~="cooldownsUsed" then combatStats[k]=0 end
-    end
-    combatStats.cooldownsUsed = {}
-end
--- ########################################################
--- Track Incoming + Outgoing Damage + Enemy Forces %
--- ########################################################
-
-local playerGUID = UnitGUID("player")
-local combatLog = {}
-local dungeonSummary = {taken=0, dealt=0, absorbed=0, blocked=0, parries=0, dodges=0, misses=0}
-
-local function ResetCombatLog()
-    combatLog = {taken=0, dealt=0, absorbed=0, blocked=0, parries=0, dodges=0, misses=0}
-end
-
-local function PrintCombatSummary()
-    if Options:IsCombatSummaryEnabled() then
-        print(string.format("Absorbed: %d | Blocked: %d | Parry: %d | Dodge: %d | Misses: %d",
-            combatLog.absorbed, combatLog.blocked, combatLog.parries, combatLog.dodges, combatLog.misses))
-        print(string.format("Damage Taken: %d | Damage Dealt: %d", combatLog.taken, combatLog.dealt))
-    end
-end
-
-local function PrintDungeonSummary()
-    if Options:IsDungeonSummaryEnabled() then
-        local cur, max = C_Scenario.GetCriteriaInfo(1) -- Enemy Forces %
-        print("===== Mythic+ Dungeon Summary =====")
-        print(string.format("Total Taken: %d | Total Dealt: %d", dungeonSummary.taken, dungeonSummary.dealt))
-        print(string.format("Absorbed: %d | Blocked: %d | Parry: %d | Dodge: %d | Misses: %d",
-            dungeonSummary.absorbed, dungeonSummary.blocked, dungeonSummary.parries, dungeonSummary.dodges, dungeonSummary.misses))
-        if cur and max then
-            local percent = (cur / max) * 100
-            print(string.format("Enemy Forces: %.1f%% (%d/%d)", percent, cur, max))
-        end
-        print("===================================")
-    end
-end
-
--- ########################################################
--- Combat Log Event Handler
--- ########################################################
-local frame = CreateFrame("Frame")
-frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-frame:RegisterEvent("PLAYER_REGEN_ENABLED")
-frame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
-
-frame:SetScript("OnEvent", function(self, event, ...)
-    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        local _, subevent, _, srcGUID, _, _, _, dstGUID, _, _, _, spellID, spellName, school, amount, overkill, schoolMask, resisted, blocked, absorbed = CombatLogGetCurrentEventInfo()
-
-        -- Incoming damage (NPC -> player)
-        if dstGUID == playerGUID then
-            if subevent == "SWING_DAMAGE" or subevent == "RANGE_DAMAGE" or subevent == "SPELL_DAMAGE" then
-                combatLog.taken = combatLog.taken + (amount or 0)
-                dungeonSummary.taken = dungeonSummary.taken + (amount or 0)
-                if absorbed then combatLog.absorbed = combatLog.absorbed + absorbed; dungeonSummary.absorbed = dungeonSummary.absorbed + absorbed end
-                if blocked then combatLog.blocked = combatLog.blocked + blocked; dungeonSummary.blocked = dungeonSummary.blocked + blocked end
-            elseif subevent == "SWING_MISSED" or subevent == "SPELL_MISSED" then
-                local missType = spellID -- reuse
-                if missType == "PARRY" then combatLog.parries = combatLog.parries + 1; dungeonSummary.parries = dungeonSummary.parries + 1 end
-                if missType == "DODGE" then combatLog.dodges = combatLog.dodges + 1; dungeonSummary.dodges = dungeonSummary.dodges + 1 end
-                if missType == "MISS" then combatLog.misses = combatLog.misses + 1; dungeonSummary.misses = dungeonSummary.misses + 1 end
-            end
-        end
-
-        -- Outgoing damage (player -> NPCs)
-        if srcGUID == playerGUID then
-            if subevent == "SWING_DAMAGE" or subevent == "RANGE_DAMAGE" or subevent == "SPELL_DAMAGE" then
-                combatLog.dealt = combatLog.dealt + (amount or 0)
-                dungeonSummary.dealt = dungeonSummary.dealt + (amount or 0)
-            end
-        end
-
-    elseif event == "PLAYER_REGEN_ENABLED" then
-        -- Print pull summary when combat ends
-        PrintCombatSummary()
-        ResetCombatLog()
-
-    elseif event == "CHALLENGE_MODE_COMPLETED" then
-        -- Print end of dungeon summary
-        PrintDungeonSummary()
-    end
-end)
-
--- =======================
--- Full Dungeon Summary
--- =======================
-local function PrintDungeonSummary()
-    local totalDamage = 0
-    local totalBlocked = 0
-    local totalAbsorbed = 0
-    local totalDodged = 0
-    local totalParried = 0
-    local totalMissed = 0
-
-    for _, entry in ipairs(fullCombatLog) do
-        totalDamage = totalDamage + (entry.damage or 0)
-        totalBlocked = totalBlocked + (entry.blocked or 0)
-        totalAbsorbed = totalAbsorbed + (entry.absorbed or 0)
-        totalDodged = totalDodged + (entry.dodged or 0)
-        totalParried = totalParried + (entry.parried or 0)
-        totalMissed = totalMissed + (entry.missed or 0)
-    end
-
-    ShowCombatText("===== Dungeon Total Summary =====")
-    ShowCombatText("Damage Taken: "..totalDamage)
-    ShowCombatText("Blocked: "..totalBlocked)
-    ShowCombatText("Absorbed: "..totalAbsorbed)
-    ShowCombatText("Dodged: "..totalDodged)
-    ShowCombatText("Parried: "..totalParried)
-    ShowCombatText("Missed: "..totalMissed)
-
-    -- Smart advice
-    if totalBlocked / totalDamage < 0.2 then
-        ShowCombatText("[Coach] Increase block stats and timing of defensive cooldowns!")
-    end
-    if totalAbsorbed / totalDamage < 0.2 then
-        ShowCombatText("[Coach] Improve absorption via shields or defensive abilities!")
-    end
-end
-
--- =======================
--- Main Event Handler
--- =======================
-f:SetScript("OnEvent", function(self, event, ...)
-    local success, err = pcall(function()
-        if event=="COMBAT_LOG_EVENT_UNFILTERED" then
-            local _, subEvent, _, _, _, _, _, _, _, _,
-                  _, spellID, spellName, _, amount, _, school, _, blocked, absorbed, critical, glancing, crushing, isOffHand, missType = CombatLogGetCurrentEventInfo()
-
-            amount = amount or 0
-            blocked = blocked or 0
-            absorbed = absorbed or 0
-            spellName = spellName or "Unknown"
-            school = school or 0
-            critical = critical or false
-            missType = missType or ""
-
-            local msg, isCrit = nil, false
-
-            if subEvent=="SWING_DAMAGE" then
-                msg = Colorize(string.format("-%d (Physical)", amount), COLORS.physical)
-                if blocked>0 then msg = msg.." "..Colorize("[Blocked "..blocked.."]", COLORS.block) end
-                if absorbed>0 then msg = msg.." "..Colorize("[Absorbed "..absorbed.."]", COLORS.absorb) end
-                if critical then isCrit=true end
-                combatStats.totalDamageTaken = combatStats.totalDamageTaken + amount
-                combatStats.blocked = combatStats.blocked + blocked
-                combatStats.absorbed = combatStats.absorbed + absorbed
-                if critical then combatStats.criticalsReceived = combatStats.criticalsReceived+1 end
-
-            elseif subEvent=="SPELL_DAMAGE" or subEvent=="RANGE_DAMAGE" then
-                local schoolTags = GetSchoolTags(school)
-                local spellText = string.format("-%d (%s)", amount, spellName)
-                local magicalTag = ""
-                if #schoolTags>0 and schoolTags[1][1]=="[Magical]" then
-                    magicalTag = Colorize(schoolTags[1][1], schoolTags[1][2])
-                end
-                local elementTags=""
-                for i=2,#schoolTags do
-                    elementTags = elementTags.." "..Colorize(schoolTags[i][1], schoolTags[i][2])
-                end
-                local modifiers=""
-                if blocked>0 then modifiers = modifiers.." "..Colorize("[Blocked "..blocked.."]", COLORS.block) end
-                if absorbed>0 then modifiers = modifiers.." "..Colorize("[Absorbed "..absorbed.."]", COLORS.absorb) end
-                msg = Colorize(spellText, schoolTags[2] and schoolTags[2][2] or COLORS.magical).." "..magicalTag..elementTags..modifiers
-                if critical then isCrit=true end
-                combatStats.totalDamageTaken = combatStats.totalDamageTaken + amount
-                combatStats.blocked = combatStats.blocked + blocked
-                combatStats.absorbed = combatStats.absorbed + absorbed
-                if critical then combatStats.criticalsReceived = combatStats.criticalsReceived+1 end
-            end
-
-            if subEvent=="SWING_MISSED" or subEvent=="SPELL_MISSED" or subEvent=="RANGE_MISSED" then
-                if missType=="DODGE" then combatStats.dodged=combatStats.dodged+1; msg=Colorize("Dodged",COLORS.dodge)
-                elseif missType=="PARRY" then combatStats.parried=combatStats.parried+1; msg=Colorize("Parried",COLORS.parry)
-                elseif missType=="MISS" then combatStats.missed=combatStats.missed+1; msg=Colorize("Missed",COLORS.miss)
-                elseif missType=="ABSORB" then combatStats.absorbed=combatStats.absorbed+amount; msg=Colorize("Absorbed",COLORS.absorb)
-                elseif missType=="BLOCK" then combatStats.blocked=combatStats.blocked+amount; msg=Colorize("Blocked",COLORS.block)
-                end
-            end
-
-            -- Display and log
-            if msg then
-                ShowCombatText(msg,isCrit)
-                table.insert(fullCombatLog, {
-                    timestamp = GetTime(),
-                    eventType = subEvent,
-                    spell = spellName,
-                    damage = amount,
-                    blocked = blocked,
-                    absorbed = absorbed,
-                    dodged = missType=="DODGE" and 1 or 0,
-                    parried = missType=="PARRY" and 1 or 0,
-                    missed = missType=="MISS" and 1 or 0,
-                })
-            end
-
-            if math.random()<0.05 then EvaluateCoach() end
-
-        elseif event=="UNIT_SPELLCAST_SUCCEEDED" then
-            local unit, spellNameCast = ...
-            if unit=="player" and trackedCooldowns[spellNameCast] then
-                if not combatStats.cooldownsUsed[spellNameCast] then combatStats.cooldownsUsed[spellNameCast]={} end
-                table.insert(combatStats.cooldownsUsed[spellNameCast], GetTime())
-                PrintCoachAdvice(spellNameCast.." used!","medium")
-            end
-
-        elseif event=="PLAYER_REGEN_ENABLED" then
-            ShowCombatSummary()
-
-        elseif event=="CHALLENGE_MODE_COMPLETED" then
-            PrintDungeonSummary()
-            fullCombatLog = {}
-
-        elseif event=="PLAYER_SPECIALIZATION_CHANGED" then
-            UpdateTrackedCooldowns()
-        end
-    end)
-    if not success then
-        print("|cffff0000[MyCombatTextCoachSmart] Error:|r "..tostring(err))
-    end
-end)
--- ########################################################
--- Floating Combat Text: Per-Mob Forces Updates (detailed)
--- ########################################################
-
 local prevForces = 0
 
+local function QueryForcesCriterion()
+    -- loop a few criterion slots and return the first that looks like "Forces"
+    for i=1,10 do
+        local name, _, _, cur, total, _, _, _, _, _ = C_Scenario.GetCriteriaInfo(i)
+        if not name then break end
+        if name:lower():find("force") or name:lower():find("enemy") then
+            return cur, total
+        end
+    end
+    return nil, nil
+end
+
 local function ShowForcesFloatingText()
-    local cur, max = select(4, C_Scenario.GetCriteriaInfo(1)), select(5, C_Scenario.GetCriteriaInfo(1))
-    if cur and max and max > 0 then
-        local gained = cur - prevForces
-        prevForces = cur
+    local cur, total = QueryForcesCriterion()
+    if not cur or not total or total == 0 then return end
+    local gained = cur - prevForces
+    if gained < 0 then gained = cur end -- reset cases
+    prevForces = cur
+    local percent = (cur / total) * 100
+    local msg = string.format("[%s] [%s] [%d/%d]",
+        ("+%d mythic mob"):format(gained),
+        ("%.1f%% total"):format(percent),
+        cur, total
+    )
+    local color = SafeGetOptionColor("coach")
+    ShowFloating(Colorize(msg, color), false)
+end
 
-        local percent = (cur / max) * 100
-        local mobTag = string.format("[+%d mythic mob]", gained)
-        local percentTag = string.format("[%.1f%% total]", percent)
-        local rawTag = string.format("[%d/%d]", cur, max)
+-- =======================
+-- Combat log handler
+-- =======================
+local function HandleCombatLogEvent(...)
+    local timestamp, subEvent = select(1, ...)
+    -- standard positions for source/dest/spell/amount from CombatLogGetCurrentEventInfo
+    -- indexes: 1=time, 2=subEvent, 4=sourceGUID, 5=sourceName, 8=destGUID, 9=destName, 12=spellID, 13=spellName, 14=spellSchool, 15=amount
+    local _, sub, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellID, spellName, spellSchool, amount, overkill, school, resisted, blocked, absorbed, critical = CombatLogGetCurrentEventInfo()
 
-        local msg = mobTag .. " " .. percentTag .. " " .. rawTag
+    amount = amount or 0
+    blocked = blocked or 0
+    absorbed = absorbed or 0
+    spellName = spellName or "Unknown"
 
-        CombatText_AddMessage(
-            msg,
-            CombatText_StandardScroll,
-            0.1, 0.8, 1.0, -- cyan-ish
-            "sticky",
-            false
-        )
+    -- OUTGOING damage done by player
+    if sourceGUID == playerGUID then
+        if sub == "SWING_DAMAGE" or sub == "RANGE_DAMAGE" or sub == "SPELL_DAMAGE" or sub == "SPELL_PERIODIC_DAMAGE" then
+            combatStats.dealt = combatStats.dealt + amount
+            table.insert(fullCombatLog, {when = GetTime(), type = "dealt", spell = spellName, amount = amount})
+            -- show outgoing with + prefix (optional color: use physical for melee, magical otherwise)
+            local outColor = (sub == "SWING_DAMAGE" and SafeGetOptionColor("physical")) or SafeGetOptionColor("magical")
+            ShowFloating(Colorize(string.format("+%d (%s)", amount, spellName), outColor), critical)
+        end
+    end
+
+    -- INCOMING damage to player
+    if destGUID == playerGUID then
+        if sub == "SWING_DAMAGE" then
+            combatStats.taken = combatStats.taken + amount
+            combatStats.blocked = combatStats.blocked + blocked
+            combatStats.absorbed = combatStats.absorbed + absorbed
+            table.insert(fullCombatLog, {when = GetTime(), type = "taken", spell = "Physical", amount = amount, blocked = blocked, absorbed = absorbed})
+            local msg = string.format("-%d (Physical)", amount)
+            if blocked>0 then msg = msg.." "..Colorize("[Blocked "..blocked.."]", SafeGetOptionColor("block")) end
+            if absorbed>0 then msg = msg.." "..Colorize("[Absorbed "..absorbed.."]", SafeGetOptionColor("absorb")) end
+            ShowFloating(Colorize(msg, SafeGetOptionColor("physical")), critical)
+        elseif sub == "RANGE_DAMAGE" or sub == "SPELL_DAMAGE" then
+            combatStats.taken = combatStats.taken + amount
+            combatStats.blocked = combatStats.blocked + blocked
+            combatStats.absorbed = combatStats.absorbed + absorbed
+            table.insert(fullCombatLog, {when = GetTime(), type = "taken", spell = spellName, amount = amount, blocked = blocked, absorbed = absorbed})
+            local schoolTags = GetSchoolTags(spellSchool or 0)
+            local mainColor = schoolTags[2] and schoolTags[2][2] or SafeGetOptionColor("magical")
+            local magicalTag = (schoolTags[1] and schoolTags[1][1]) and Colorize(schoolTags[1][1], SafeGetOptionColor("magical")) or ""
+            local elementTags = ""
+            for i=2,#schoolTags do elementTags = elementTags.." "..Colorize(schoolTags[i][1], schoolTags[i][2]) end
+            local msg = string.format("-%d (%s) %s%s", amount, spellName, magicalTag, elementTags)
+            if blocked>0 then msg = msg.." "..Colorize("[Blocked "..blocked.."]", SafeGetOptionColor("block")) end
+            if absorbed>0 then msg = msg.." "..Colorize("[Absorbed "..absorbed.."]", SafeGetOptionColor("absorb")) end
+            ShowFloating(Colorize(msg, mainColor), critical)
+        elseif sub == "SPELL_PERIODIC_DAMAGE" then
+            -- check for bleed
+            if BLEED_SPELLS[spellID] then
+                combatStats.taken = combatStats.taken + amount
+                table.insert(fullCombatLog, {when = GetTime(), type = "taken", spell = spellName, amount = amount, bleed = true})
+                ShowFloating(Colorize(string.format("-%d (%s) [Bleed]", amount, spellName), SafeGetOptionColor("bleed")), critical)
+            else
+                combatStats.taken = combatStats.taken + amount
+                table.insert(fullCombatLog, {when = GetTime(), type = "taken", spell = spellName, amount = amount})
+                ShowFloating(Colorize(string.format("-%d (Dot: %s)", amount, spellName), SafeGetOptionColor("magical")), critical)
+            end
+        elseif sub == "SWING_MISSED" or sub == "SPELL_MISSED" or sub == "RANGE_MISSED" then
+            local missType = select(21, CombatLogGetCurrentEventInfo()) or ""
+            if missType == "DODGE" then combatStats.dodged = combatStats.dodged + 1; ShowFloating(Colorize("Dodged", SafeGetOptionColor("dodge")), false)
+            elseif missType == "PARRY" then combatStats.parried = combatStats.parried + 1; ShowFloating(Colorize("Parried", SafeGetOptionColor("parry")), false)
+            elseif missType == "MISS" then combatStats.missed = combatStats.missed + 1; ShowFloating(Colorize("Missed", SafeGetOptionColor("miss")), false)
+            elseif missType == "ABSORB" then combatStats.absorbed = combatStats.absorbed + amount; ShowFloating(Colorize("Absorbed", SafeGetOptionColor("absorb")), false)
+            elseif missType == "BLOCK" then combatStats.blocked = combatStats.blocked + amount; ShowFloating(Colorize("Blocked", SafeGetOptionColor("block")), false) end
+        end
     end
 end
 
--- Extend OnEvent handler
-frame:SetScript("OnEvent", function(self, event, ...)
-    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        local _, subevent = CombatLogGetCurrentEventInfo()
+-- =======================
+-- Summaries
+-- =======================
+local function ShowCombatSummary()
+    -- per-pull (on leaving combat)
+    local total = combatStats.taken
+    local absorbedPct = total>0 and (combatStats.absorbed / total * 100) or 0
+    local blockedPct = total>0 and (combatStats.blocked / total * 100) or 0
+    local parryRate = (combatStats.parried + combatStats.dodged + combatStats.missed) > 0 and
+                      (combatStats.parried / (combatStats.parried + combatStats.dodged + combatStats.missed) * 100) or 0
 
-        -- === Mob Death (forces %) ===
-        if subevent == "UNIT_DIED" then
-            C_Timer.After(0.5, ShowForcesFloatingText)
+    ShowFloating(Colorize("===== Combat Summary =====", SafeGetOptionColor("coach")))
+    ShowFloating(Colorize(string.format("Absorbed: %d (%.1f%%)", combatStats.absorbed, absorbedPct), SafeGetOptionColor("absorb")))
+    ShowFloating(Colorize(string.format("Blocked: %d (%.1f%%)", combatStats.blocked, blockedPct), SafeGetOptionColor("block")))
+    ShowFloating(Colorize(string.format("Parry Rate: %.1f%%", parryRate), SafeGetOptionColor("parry")))
+    ShowFloating(Colorize("Damage Taken: "..combatStats.taken, SafeGetOptionColor("physical")))
+    ShowFloating(Colorize("Damage Dealt: "..combatStats.dealt, SafeGetOptionColor("magical")))
+    -- reset per-pull
+    combatStats.taken = 0; combatStats.dealt = 0; combatStats.absorbed = 0; combatStats.blocked = 0
+    combatStats.parried = 0; combatStats.dodged = 0; combatStats.missed = 0
+    combatStats.cooldownsUsed = {}
+end
+
+local function PrintDungeonSummary()
+    -- compile fullCombatLog if you want more detailed aggregations
+    ShowFloating(Colorize("===== Dungeon Total Summary =====", SafeGetOptionColor("coach")))
+    local totalTaken, totalBlocked, totalAbsorbed, totalDodged, totalParried, totalMissed, totalDealt = 0,0,0,0,0,0,0
+    for i=1,#fullCombatLog do
+        local e = fullCombatLog[i]
+        if e.type=="taken" then
+            totalTaken = totalTaken + (e.amount or 0)
+            totalBlocked = totalBlocked + (e.blocked or 0)
+            totalAbsorbed = totalAbsorbed + (e.absorbed or 0)
+            totalDodged = totalDodged + (e.dodged or 0)
+            totalParried = totalParried + (e.parried or 0)
+            totalMissed = totalMissed + (e.missed or 0)
+        elseif e.type=="dealt" then
+            totalDealt = totalDealt + (e.amount or 0)
         end
+    end
+    ShowFloating(Colorize("Damage Taken: "..totalTaken, SafeGetOptionColor("physical")))
+    ShowFloating(Colorize("Blocked: "..totalBlocked, SafeGetOptionColor("block")))
+    ShowFloating(Colorize("Absorbed: "..totalAbsorbed, SafeGetOptionColor("absorb")))
+    ShowFloating(Colorize("Dodged: "..totalDodged, SafeGetOptionColor("dodge")))
+    ShowFloating(Colorize("Parried: "..totalParried, SafeGetOptionColor("parry")))
+    ShowFloating(Colorize("Missed: "..totalMissed, SafeGetOptionColor("miss")))
+    ShowFloating(Colorize("Damage Dealt: "..totalDealt, SafeGetOptionColor("magical")))
+end
 
-        -- (existing incoming/outgoing damage logic…)
+-- =======================
+-- Event hookup
+-- =======================
+f:RegisterEvent("PLAYER_LOGIN")
+f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+f:RegisterEvent("PLAYER_REGEN_ENABLED")      -- leave combat
+f:RegisterEvent("CHALLENGE_MODE_COMPLETED") -- dungeon done
+f:RegisterEvent("UNIT_DIED")
 
-    elseif event == "PLAYER_ENTERING_WORLD" then
-        prevForces = 0 -- reset per dungeon start
+f:SetScript("OnEvent", function(self, event, ...)
+    if event == "PLAYER_LOGIN" then
+        playerGUID = UnitGUID("player")
+        prevForces = 0
+        -- if options exist, ensure they're available; options.lua should set MyCombatTextOptions globally
+    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        -- pass through current event
+        HandleCombatLogEvent(CombatLogGetCurrentEventInfo())
     elseif event == "PLAYER_REGEN_ENABLED" then
-        PrintCombatSummary()
-        ResetCombatLog()
+        ShowCombatSummary()
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         PrintDungeonSummary()
+        fullCombatLog = {} -- reset dungeon log if you want
+        prevForces = 0
+    elseif event == "UNIT_DIED" then
+        -- show live mob progress after a short delay so the scenario info updates
+        C_Timer.After(0.35, ShowForcesFloatingText)
     end
 end)
 
--- =======================
--- Periodic Smart Coach Evaluation
--- =======================
-C_Timer.NewTicker(10, EvaluateCoach)
+-- Periodic coach eval (non-blocking)
+if C_Timer then
+    C_Timer.NewTicker(10, function()
+        -- lightweight coach check (optional)
+        -- EvaluateCoach() -- if you have that function in your main file, or keep this stub
+    end)
+end
+
+-- end of file
