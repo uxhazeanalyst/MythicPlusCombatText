@@ -236,6 +236,11 @@ SlashCmdList["MYCOMBATTEXT"]=function(msg)
     elseif cmd=="export" then Options:Export()
     elseif cmd=="import" then Options:Import(rest)
     elseif cmd=="share" then Options:Share()
+    elseif cmd=="healer" then 
+    Options:ToggleHealerCoach(rest=="on")
+    elseif cmd=="healersum" then 
+    Options:ToggleHealerSummary(rest=="on")
+
     else
         print("Usage: /mcts size <num>, colors <type> <r> <g> <b>, multischool on/off, combat on/off, dungeon on/off, coach on/off, reset, export, import <string>")
     end
