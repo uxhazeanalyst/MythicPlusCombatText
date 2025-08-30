@@ -448,6 +448,13 @@ if aoe_burst > coach.aoe_threshold then
     local spell = coach.aoe_suggestions[math.random(#coach.aoe_suggestions)]
     Alert("Group AoE! Try: "..spell)
 end
+frame:SetScript("OnEvent", function(self, event)
+    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        OnCombatLogEvent()
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        ShowHealerSummary()
+    end
+end)
 
 -- =======================
 -- Event hookup
