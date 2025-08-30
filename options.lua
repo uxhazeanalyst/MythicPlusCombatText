@@ -1,6 +1,5 @@
 -- ########################################################
 -- MyCombatTextCoachSmart Options (Per-Character Only)
--- Export/Import with Base64 encoded settings
 -- ########################################################
 
 local Options = {}
@@ -20,195 +19,120 @@ Options.defaults = {
         shadow   = {r=0.4, g=0, b=0.6},
         arcane   = {r=0.7, g=0.3, b=0.9},
         bleed    = {r=0.8, g=0.1, b=0.1},
-
         dodge    = {r=1, g=1, b=0},
         parry    = {r=0, g=1, b=1},
         absorb   = {r=0, g=1, b=0},
         miss     = {r=0.7, g=0.7, b=0.7},
         block    = {r=0.6, g=0.4, b=1},
         coach    = {r=1, g=0.66, b=0},
+    },
     showMultiSchoolTags = true,
-    showCombatSummary = true,
-    showDungeonSummary = true,
-    enableSmartCoach = true,
-
-    -- NEW healer coaching options
-    enableHealerCoach = true,
+    showCombatSummary   = true,
+    showDungeonSummary  = true,
+    enableSmartCoach    = true,
+    enableHealerCoach   = true,
     enableHealerSummary = true,
 }
 
 -- =======================
--- Load Per-Character Settings
+-- Load Settings
 -- =======================
 Options.settings = {}
 
+local function SaveSettings() MyCombatTextCharDB = Options.settings end
+
 local function LoadSettings()
-    if MyCombatTextCharDB then
-        for k,v in pairs(Options.defaults) do
-            if type(v)=="table" then
-                Options.settings[k] = {}
-                for key,val in pairs(v) do
-                    if type(val)=="table" then
-                        Options.settings[k][key] = MyCombatTextCharDB[k] and MyCombatTextCharDB[k][key] or val
-                    else
-                        Options.settings[k][key] = (MyCombatTextCharDB[k] and MyCombatTextCharDB[k][key]) or val
-                    end
-                end
-            else
-                Options.settings[k] = (MyCombatTextCharDB[k] ~= nil and MyCombatTextCharDB[k]) or v
-            end
-        end
-    else
+    if not MyCombatTextCharDB then
         Options:ResetToDefaults()
+        return
+    end
+    Options.settings = {}
+    for k,v in pairs(Options.defaults) do
+        if type(v)=="table" then
+            Options.settings[k]={}
+            for kk,vv in pairs(v) do
+                Options.settings[k][kk] = (MyCombatTextCharDB[k] and MyCombatTextCharDB[k][kk]) or vv
+            end
+        else
+            Options.settings[k] = (MyCombatTextCharDB[k]~=nil and MyCombatTextCharDB[k]) or v
+        end
     end
 end
 
-local function SaveSettings()
-    MyCombatTextCharDB = Options.settings
-end
-
 -- =======================
--- Setters / Getters
+-- Getters/Setters
 -- =======================
 function Options:SetColor(eventType,r,g,b)
-    eventType = eventType:lower()
+    eventType=eventType:lower()
     if self.settings.colors[eventType] then
-        self.settings.colors[eventType] = {r=r,g=g,b=b}
+        self.settings.colors[eventType]={r=r,g=g,b=b}
         SaveSettings()
-    else
-        print("Unknown eventType:", eventType)
-    end
+    else print("Unknown eventType:",eventType) end
 end
 
-function Options:SetTextSize(size) self.settings.textSize=size; SaveSettings() end
-function Options:ToggleMultiSchoolTags(state) self.settings.showMultiSchoolTags=state; SaveSettings() end
-function Options:ToggleCombatSummary(state) self.settings.showCombatSummary=state; SaveSettings() end
-function Options:ToggleDungeonSummary(state) self.settings.showDungeonSummary=state; SaveSettings() end
-function Options:ToggleSmartCoach(state) self.settings.enableSmartCoach=state; SaveSettings() end
+function Options:GetColor(eventType)
+    return self.settings.colors[eventType:lower()] or {r=1,g=1,b=1}
+end
 
-function Options:GetColor(eventType) return self.settings.colors[eventType:lower()] or {r=1,g=1,b=1} end
+function Options:SetTextSize(s) self.settings.textSize=s; SaveSettings() end
 function Options:GetTextSize() return self.settings.textSize end
-function Options:IsMultiSchoolTagsEnabled() return self.settings.showMultiSchoolTags end
-function Options:IsCombatSummaryEnabled() return self.settings.showCombatSummary end
-function Options:IsDungeonSummaryEnabled() return self.settings.showDungeonSummary end
-function Options:IsSmartCoachEnabled() return self.settings.enableSmartCoach end
-function Options:ToggleHealerCoach(state) 
-    self.settings.enableHealerCoach = state
-    SaveSettings()
-end
 
-function Options:ToggleHealerSummary(state) 
-    self.settings.enableHealerSummary = state
-    SaveSettings()
-end
-
+function Options:ToggleHealerCoach(state) self.settings.enableHealerCoach=state; SaveSettings() end
 function Options:IsHealerCoachEnabled() return self.settings.enableHealerCoach end
+
+function Options:ToggleHealerSummary(state) self.settings.enableHealerSummary=state; SaveSettings() end
 function Options:IsHealerSummaryEnabled() return self.settings.enableHealerSummary end
 
 -- =======================
 -- Reset
 -- =======================
 function Options:ResetToDefaults()
-    self.settings = {}
+    self.settings={}
     for k,v in pairs(Options.defaults) do
         if type(v)=="table" then
-            self.settings[k] = {}
-            for key,val in pairs(v) do
-                if type(val)=="table" then
-                    self.settings[k][key] = {}
-                    for subk,subv in pairs(val) do
-                        self.settings[k][key][subk] = subv
-                    end
-                else
-                    self.settings[k][key] = val
-                end
-            end
-        else
-            self.settings[k] = v
-        end
+            self.settings[k]={}
+            for kk,vv in pairs(v) do self.settings[k][kk]=vv end
+        else self.settings[k]=v end
     end
     SaveSettings()
 end
 
 -- =======================
--- Base64 Helpers
+-- Export/Import
 -- =======================
 local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
 local function base64enc(data)
-    return ((data:gsub('.', function(x) 
+    return ((data:gsub('.', function(x)
         local r,byte='',x:byte()
         for i=8,1,-1 do r=r..(byte%2^i-byte%2^(i-1)>0 and '1' or '0') end
         return r
     end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
-        if #x < 6 then return '' end
+        if #x<6 then return '' end
         local c=0
         for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
         return b:sub(c+1,c+1)
     end)..({ '', '==', '=' })[#data%3+1])
 end
 
-local function base64dec(data)
-    data = data:gsub('[^'..b..'=]', '')
-    return (data:gsub('.', function(x)
-        if x == '=' then return '' end
-        local r,f='',(b:find(x)-1)
-        for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
-        return r
-    end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
-        if #x ~= 8 then return '' end
-        local c=0
-        for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end
-        return string.char(c)
-    end))
-end
-
--- =======================
--- Serialization
--- =======================
 local function Serialize(tbl)
-    local function serializeTable(t)
-        local parts={}
-        for k,v in pairs(t) do
-            if type(v)=="table" then
-                table.insert(parts, k.."="..serializeTable(v))
-            elseif type(v)=="boolean" then
-                table.insert(parts, k.."="..(v and "1" or "0"))
-            else
-                table.insert(parts, k.."="..tostring(v))
-            end
+    local parts={}
+    for k,v in pairs(tbl) do
+        if type(v)=="table" then
+            table.insert(parts,k.."="..Serialize(v))
+        elseif type(v)=="boolean" then
+            table.insert(parts,k.."="..(v and "1" or "0"))
+        else
+            table.insert(parts,k.."="..tostring(v))
         end
-        return "{"..table.concat(parts,",").."}"
     end
-    return serializeTable(tbl)
+    return "{"..table.concat(parts,",").."}"
 end
 
-local function Deserialize(str)
-    local f,err = loadstring("return "..str)
-    if not f then return nil, err end
-    local ok, result = pcall(f)
-    if ok then return result else return nil, result end
-end
-
--- =======================
--- Export / Import
--- =======================
 function Options:Export()
-    local raw = Serialize(self.settings)
-    local encoded = base64enc(raw)
+    local raw=Serialize(self.settings)
+    local encoded=base64enc(raw)
     print("MyCombatText Export String:\n"..encoded)
-end
-
-function Options:Import(str)
-    local decoded = base64dec(str)
-    local tbl, err = Deserialize(decoded)
-    if not tbl then
-        print("Import failed: "..(err or "unknown error"))
-        return
-    end
-    self.settings = tbl
-    SaveSettings()
-    print("Import successful! Settings applied.")
 end
 
 -- =======================
@@ -220,58 +144,16 @@ SlashCmdList["MYCOMBATTEXT"]=function(msg)
     local cmd, rest = msg:match("^(%S*)%s*(.-)$")
     cmd=cmd:lower()
     if cmd=="size" and tonumber(rest) then
-        Options:SetTextSize(tonumber(rest))
-        print("Text size set to "..rest)
+        Options:SetTextSize(tonumber(rest)); print("Text size set to "..rest)
     elseif cmd=="colors" then
-        local typeName,r,g,b=rest:match("^(%S+)%s+(%d+%.?%d*)%s+(%d+%.?%d*)%s+(%d+%.?%d*)$")
-        if typeName and r and g and b then
-            Options:SetColor(typeName,tonumber(r),tonumber(g),tonumber(b))
-            print("Set "..typeName.." color to",r,g,b)
-        end
-    elseif cmd=="multischool" then Options:ToggleMultiSchoolTags(rest=="on")
-    elseif cmd=="combat" then Options:ToggleCombatSummary(rest=="on")
-    elseif cmd=="dungeon" then Options:ToggleDungeonSummary(rest=="on")
-    elseif cmd=="coach" then Options:ToggleSmartCoach(rest=="on")
+        local t,r,g,b=rest:match("^(%S+)%s+(%d+%.?%d*)%s+(%d+%.?%d*)%s+(%d+%.?%d*)$")
+        if t then Options:SetColor(t,tonumber(r),tonumber(g),tonumber(b)) end
     elseif cmd=="reset" then Options:ResetToDefaults()
     elseif cmd=="export" then Options:Export()
-    elseif cmd=="import" then Options:Import(rest)
-    elseif cmd=="share" then Options:Share()
-    elseif cmd=="healer" then 
-    Options:ToggleHealerCoach(rest=="on")
-    elseif cmd=="healersum" then 
-    Options:ToggleHealerSummary(rest=="on")
-
-    else
-        print("Usage: /mcts size <num>, colors <type> <r> <g> <b>, multischool on/off, combat on/off, dungeon on/off, coach on/off, reset, export, import <string>")
+    elseif cmd=="healer" then Options:ToggleHealerCoach(rest=="on")
+    elseif cmd=="healersum" then Options:ToggleHealerSummary(rest=="on")
+    else print("Usage: /mcts size <num>, colors <type> r g b, healer on/off, healersum on/off, reset, export")
     end
-end
-
--- =======================
--- Share (Popup EditBox)
--- =======================
-StaticPopupDialogs["MYCOMBATTEXT_SHARE"] = {
-    text = "Copy this export string:",
-    button1 = "Close",
-    hasEditBox = true,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-    preferredIndex = 3,
-    OnShow = function(self, data)
-        local editBox = self.editBox
-        editBox:SetText(data)
-        editBox:HighlightText()
-        editBox:SetFocus()
-    end,
-    EditBoxOnEscapePressed = function(self)
-        self:GetParent():Hide()
-    end,
-}
-
-function Options:Share()
-    local raw = Serialize(self.settings)
-    local encoded = base64enc(raw)
-    StaticPopup_Show("MYCOMBATTEXT_SHARE", nil, nil, encoded)
 end
 
 -- =======================
