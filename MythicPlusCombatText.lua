@@ -166,10 +166,6 @@ end
 -- Combat log handler
 -- =======================
 local function HandleCombatLogEvent(...)
-    -- filter events
-if not ShouldProcessCombatEvent(sourceGUID, destGUID) then
-    return
-end
 
     local timestamp, subEvent = select(1, ...)
     -- standard positions for source/dest/spell/amount from CombatLogGetCurrentEventInfo
@@ -182,7 +178,10 @@ local function OnCombatLogEvent()
     local _, subEvent, _, srcGUID, srcName, _, _, destGUID, destName, _, _, spellID, spellName, _, amount = CombatLogGetCurrentEventInfo()
     if subEvent ~= "SPELL_DAMAGE" and subEvent ~= "SWING_DAMAGE" then return end
     if not amount then return end
-
+    -- filter events
+if not ShouldProcessCombatEvent(sourceGUID, destGUID) then
+    return
+end
     -- Tank check
     if UnitIsUnit(destName, "target") or UnitGroupRolesAssigned(destName) == "TANK" then
         stTotal = stTotal + amount
