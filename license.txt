@@ -1,5 +1,5 @@
 MyCombatTextCoachSmart_Dungeon
-Copyright (c) 2025 YourName
+Copyright (c) 2025 uxhazeanalyst
 
 Permission is granted to use this addon for personal, non-commercial purposes only.
 You may use, modify, or run this addon for your own gameplay.
