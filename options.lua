@@ -12,6 +12,7 @@ Options.defaults = {
     textSize = 16,
     colors = {
         physical = {r=1, g=0, b=0},
+        magical  = {r=0.6, g=0.8, b=1},
         holy     = {r=1, g=0.9, b=0.5},
         fire     = {r=1, g=0.3, b=0},
         nature   = {r=0.6, g=0.9, b=0.2},
@@ -26,11 +27,14 @@ Options.defaults = {
         miss     = {r=0.7, g=0.7, b=0.7},
         block    = {r=0.6, g=0.4, b=1},
         coach    = {r=1, g=0.66, b=0},
-    },
     showMultiSchoolTags = true,
     showCombatSummary = true,
     showDungeonSummary = true,
     enableSmartCoach = true,
+
+    -- NEW healer coaching options
+    enableHealerCoach = true,
+    enableHealerSummary = true,
 }
 
 -- =======================
@@ -88,6 +92,18 @@ function Options:IsMultiSchoolTagsEnabled() return self.settings.showMultiSchool
 function Options:IsCombatSummaryEnabled() return self.settings.showCombatSummary end
 function Options:IsDungeonSummaryEnabled() return self.settings.showDungeonSummary end
 function Options:IsSmartCoachEnabled() return self.settings.enableSmartCoach end
+function Options:ToggleHealerCoach(state) 
+    self.settings.enableHealerCoach = state
+    SaveSettings()
+end
+
+function Options:ToggleHealerSummary(state) 
+    self.settings.enableHealerSummary = state
+    SaveSettings()
+end
+
+function Options:IsHealerCoachEnabled() return self.settings.enableHealerCoach end
+function Options:IsHealerSummaryEnabled() return self.settings.enableHealerSummary end
 
 -- =======================
 -- Reset
