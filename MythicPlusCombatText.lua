@@ -163,112 +163,141 @@ local function ShowForcesFloatingText()
 end
 
 -- =======================
--- Combat log handler
+-- Healing CD Suggestions (Class Aware)
 -- =======================
-local function HandleCombatLogEvent(...)
+local HEALER_COOLDOWNS = {
+    PRIEST = {
+        {name="Divine Hymn", spellID=64843},
+        {name="Power Word: Barrier", spellID=62618},
+    },
+    DRUID = {
+        {name="Tranquility", spellID=740},
+        {name="Flourish", spellID=197721},
+    },
+    MONK = {
+        {name="Revival", spellID=115310},
+        {name="Life Cocoon", spellID=116849},
+    },
+    SHAMAN = {
+        {name="Spirit Link Totem", spellID=98008},
+        {name="Healing Tide Totem", spellID=108280},
+    },
+    PALADIN = {
+        {name="Aura Mastery", spellID=31821},
+        {name="Lay on Hands", spellID=633},
+    },
+    EVOKER = {
+        {name="Rewind", spellID=363534},
+        {name="Dream Breath", spellID=355913},
+    },
+}
 
-    local timestamp, subEvent = select(1, ...)
-    -- standard positions for source/dest/spell/amount from CombatLogGetCurrentEventInfo
-    -- indexes: 1=time, 2=subEvent, 4=sourceGUID, 5=sourceName, 8=destGUID, 9=destName, 12=spellID, 13=spellName, 14=spellSchool, 15=amount
-    local _, sub, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellID, spellName, spellSchool, amount, overkill, school, resisted, blocked, absorbed, critical = CombatLogGetCurrentEventInfo()
-    local aoeTotal, stTotal = 0, 0
-local groupSize = GetNumGroupMembers() or 1
+local function GetHealerClasses()
+    local healers = {}
+    local numGroupMembers = GetNumGroupMembers()
+    local prefix = IsInRaid() and "raid" or "party"
 
-local function OnCombatLogEvent()
-    local _, subEvent, _, srcGUID, srcName, _, _, destGUID, destName, _, _, spellID, spellName, _, amount = CombatLogGetCurrentEventInfo()
-    if subEvent ~= "SPELL_DAMAGE" and subEvent ~= "SWING_DAMAGE" then return end
-    if not amount then return end
-    -- filter events
-if not ShouldProcessCombatEvent(sourceGUID, destGUID) then
-    return
-end
-    -- Tank check
-    if UnitIsUnit(destName, "target") or UnitGroupRolesAssigned(destName) == "TANK" then
-        stTotal = stTotal + amount
-        if amount > 40000 then
-            HealerAlert("Tank burst! "..amount.." dmg → Use PS / Ironbark")
+    for i = 1, numGroupMembers do
+        local unit = prefix..i
+        if UnitExists(unit) and not UnitIsUnit(unit, "player") then
+            local role = UnitGroupRolesAssigned(unit)
+            if role == "HEALER" then
+                local _, class = UnitClass(unit)
+                healers[class] = true
+            end
         end
-    else
-        aoeTotal = aoeTotal + amount
-        if amount > 20000 and groupSize > 2 then
-            HealerAlert("Group AoE hit! "..amount.." dmg → Try Barrier / HTT / Revival")
+    end
+
+    if UnitGroupRolesAssigned("player") == "HEALER" then
+        local _, class = UnitClass("player")
+        healers[class] = true
+    end
+
+    return healers
+end
+
+local function SuggestHealingCooldowns(damageSpike)
+    local healers = GetHealerClasses()
+    for class, _ in pairs(healers) do
+        local cds = HEALER_COOLDOWNS[class]
+        if cds then
+            for _, cd in ipairs(cds) do
+                if damageSpike > 0.3 then -- >30% group HP lost quickly
+                    ShowFloating(Colorize("Suggest: "..cd.name, {r=0, g=1, b=0}), false)
+                end
+            end
         end
     end
 end
+
+-- =======================
+-- Combat Log Handler
+-- =======================
+local function HandleCombatLogEvent()
+    local _, subEvent, _, sourceGUID, sourceName, _, _, destGUID, destName,
+        _, _, spellID, spellName, spellSchool, amount, overkill, school,
+        resisted, blocked, absorbed, critical = CombatLogGetCurrentEventInfo()
 
     amount = amount or 0
     blocked = blocked or 0
     absorbed = absorbed or 0
     spellName = spellName or "Unknown"
 
-    -- OUTGOING damage done by player
+    -- === OUTGOING damage ===
     if sourceGUID == playerGUID then
-        if sub == "SWING_DAMAGE" or sub == "RANGE_DAMAGE" or sub == "SPELL_DAMAGE" or sub == "SPELL_PERIODIC_DAMAGE" then
+        if subEvent == "SWING_DAMAGE" or subEvent == "RANGE_DAMAGE" or
+           subEvent == "SPELL_DAMAGE" or subEvent == "SPELL_PERIODIC_DAMAGE" then
             combatStats.dealt = combatStats.dealt + amount
-            table.insert(fullCombatLog, {when = GetTime(), type = "dealt", spell = spellName, amount = amount})
-            -- show outgoing with + prefix (optional color: use physical for melee, magical otherwise)
-            local outColor = (sub == "SWING_DAMAGE" and SafeGetOptionColor("physical")) or SafeGetOptionColor("magical")
+            local outColor = (subEvent == "SWING_DAMAGE" and SafeGetOptionColor("physical"))
+                          or SafeGetOptionColor("magical")
             ShowFloating(Colorize(string.format("+%d (%s)", amount, spellName), outColor), critical)
         end
     end
 
-    -- INCOMING damage to player
+    -- === INCOMING damage ===
     if destGUID == playerGUID then
-        if sub == "SWING_DAMAGE" then
+        if subEvent == "SWING_DAMAGE" or subEvent == "RANGE_DAMAGE" or
+           subEvent == "SPELL_DAMAGE" or subEvent == "SPELL_PERIODIC_DAMAGE" then
             combatStats.taken = combatStats.taken + amount
-            combatStats.blocked = combatStats.blocked + blocked
-            combatStats.absorbed = combatStats.absorbed + absorbed
-            table.insert(fullCombatLog, {when = GetTime(), type = "taken", spell = "Physical", amount = amount, blocked = blocked, absorbed = absorbed})
-            local msg = string.format("-%d (Physical)", amount)
-            if blocked>0 then msg = msg.." "..Colorize("[Blocked "..blocked.."]", SafeGetOptionColor("block")) end
-            if absorbed>0 then msg = msg.." "..Colorize("[Absorbed "..absorbed.."]", SafeGetOptionColor("absorb")) end
+            local msg = string.format("-%d (%s)", amount, spellName)
             ShowFloating(Colorize(msg, SafeGetOptionColor("physical")), critical)
-        elseif sub == "RANGE_DAMAGE" or sub == "SPELL_DAMAGE" then
-            combatStats.taken = combatStats.taken + amount
-            combatStats.blocked = combatStats.blocked + blocked
-            combatStats.absorbed = combatStats.absorbed + absorbed
-            table.insert(fullCombatLog, {when = GetTime(), type = "taken", spell = spellName, amount = amount, blocked = blocked, absorbed = absorbed})
-            local schoolTags = GetSchoolTags(spellSchool or 0)
-            local mainColor = schoolTags[2] and schoolTags[2][2] or SafeGetOptionColor("magical")
-            local magicalTag = (schoolTags[1] and schoolTags[1][1]) and Colorize(schoolTags[1][1], SafeGetOptionColor("magical")) or ""
-            local mainColor = SafeGetOptionColor("magical")
-            if schoolTags[2] and schoolTags[2][2] then
-            mainColor = schoolTags[2][2]
-        end
 
-            local elementTags = ""
-            for i=2,#schoolTags do elementTags = elementTags.." "..Colorize(schoolTags[i][1], schoolTags[i][2]) end
-            local msg = string.format("-%d (%s) %s%s", amount, spellName, magicalTag, elementTags)
-            if blocked>0 then msg = msg.." "..Colorize("[Blocked "..blocked.."]", SafeGetOptionColor("block")) end
-            if absorbed>0 then msg = msg.." "..Colorize("[Absorbed "..absorbed.."]", SafeGetOptionColor("absorb")) end
-            ShowFloating(Colorize(msg, mainColor), critical)
-        elseif sub == "SPELL_PERIODIC_DAMAGE" then
-            -- check for bleed
-            if BLEED_SPELLS[spellID] then
-                combatStats.taken = combatStats.taken + amount
-                table.insert(fullCombatLog, {when = GetTime(), type = "taken", spell = spellName, amount = amount, bleed = true})
-                ShowFloating(Colorize(string.format("-%d (%s) [Bleed]", amount, spellName), SafeGetOptionColor("bleed")), critical)
-            else
-                combatStats.taken = combatStats.taken + amount
-                table.insert(fullCombatLog, {when = GetTime(), type = "taken", spell = spellName, amount = amount})
-                ShowFloating(Colorize(string.format("-%d (Dot: %s)", amount, spellName), SafeGetOptionColor("magical")), critical)
+            -- track AoE damage: if multiple people get chunked, trigger coaching
+            if subEvent == "SPELL_DAMAGE" or subEvent == "SPELL_PERIODIC_DAMAGE" then
+                local groupHPBefore, groupHPAfter = 0, 0
+                local members = GetNumGroupMembers()
+                local prefix = IsInRaid() and "raid" or "party"
+                for i = 1, members do
+                    local unit = prefix..i
+                    if UnitExists(unit) then
+                        local hp, maxhp = UnitHealth(unit), UnitHealthMax(unit)
+                        groupHPBefore = groupHPBefore + maxhp
+                        groupHPAfter  = groupHPAfter + hp
+                    end
+                end
+                if groupHPBefore > 0 then
+                    local spike = (groupHPBefore - groupHPAfter) / groupHPBefore
+                    if spike > 0.25 then -- spike threshold
+                        SuggestHealingCooldowns(spike)
+                    end
+                end
             end
-        elseif sub == "SWING_MISSED" or sub == "SPELL_MISSED" or sub == "RANGE_MISSED" then
-            elseif sub == "SWING_MISSED" then
-    local missType = select(12, CombatLogGetCurrentEventInfo())
-elseif sub == "SPELL_MISSED" or sub == "RANGE_MISSED" then
-    local missType = select(15, CombatLogGetCurrentEventInfo())
-end
-
+        elseif subEvent == "SWING_MISSED" or subEvent == "SPELL_MISSED" or subEvent == "RANGE_MISSED" then
             local missType = select(21, CombatLogGetCurrentEventInfo()) or ""
-            if missType == "DODGE" then combatStats.dodged = combatStats.dodged + 1; ShowFloating(Colorize("Dodged", SafeGetOptionColor("dodge")), false)
-            elseif missType == "PARRY" then combatStats.parried = combatStats.parried + 1; ShowFloating(Colorize("Parried", SafeGetOptionColor("parry")), false)
-            elseif missType == "MISS" then combatStats.missed = combatStats.missed + 1; ShowFloating(Colorize("Missed", SafeGetOptionColor("miss")), false)
-            elseif missType == "ABSORB" then combatStats.absorbed = combatStats.absorbed + amount; ShowFloating(Colorize("Absorbed", SafeGetOptionColor("absorb")), false)
-            elseif missType == "BLOCK" then combatStats.blocked = combatStats.blocked + amount; ShowFloating(Colorize("Blocked", SafeGetOptionColor("block")), false) end
+            if missType == "DODGE" then ShowFloating(Colorize("Dodged", SafeGetOptionColor("dodge")), false)
+            elseif missType == "PARRY" then ShowFloating(Colorize("Parried", SafeGetOptionColor("parry")), false)
+            elseif missType == "MISS" then ShowFloating(Colorize("Missed", SafeGetOptionColor("miss")), false)
+            elseif missType == "ABSORB" then ShowFloating(Colorize("Absorbed", SafeGetOptionColor("absorb")), false)
+            elseif missType == "BLOCK" then ShowFloating(Colorize("Blocked", SafeGetOptionColor("block")), false) end
         end
     end
 end
+
+-- Register handler
+local f = CreateFrame("Frame")
+f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+f:SetScript("OnEvent", function() HandleCombatLogEvent() end)
+
 -- =======================
 -- Config toggle
 -- =======================
