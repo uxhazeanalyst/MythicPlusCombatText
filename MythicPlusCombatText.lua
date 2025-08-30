@@ -5,6 +5,9 @@
 -- ########################################################
 
 local f = CreateFrame("Frame")
+local frame = CreateFrame("Frame")
+frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+frame:RegisterEvent("PLAYER_REGEN_ENABLED") -- fires at combat end
 
 -- safe reference to player GUID (update on login/specialization)
 local playerGUID = UnitGUID("player")
