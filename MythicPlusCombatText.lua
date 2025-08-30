@@ -1,16 +1,9 @@
 -- ########################################################
 -- MythicPlusCombatText.lua
--- MyCombatTextCoachSmart - corrected, ready-to-paste
+-- MyCombatTextCoachSmart - Corrected Version
 -- ########################################################
 
 local f = CreateFrame("Frame")
-f:RegisterEvent("PLAYER_LOGIN")
-f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-f:RegisterEvent("PLAYER_REGEN_ENABLED")
-f:RegisterEvent("CHALLENGE_MODE_COMPLETED")
-f:RegisterEvent("UNIT_DIED")
-
--- safe reference to player GUID
 local playerGUID = UnitGUID("player")
 
 -- =======================
@@ -20,10 +13,10 @@ local COLORS = {
     physical = {r=1, g=0,   b=0},
     bleed    = {r=0.8, g=0, b=0},
     holy     = {r=1, g=0.84, b=0},
-    fire     = {r=1, g=0.3, b=0},
+    fire     = {r=1, g=0,   b=0},
     nature   = {r=0.6, g=0.4, b=0.2},
     frost    = {r=0, g=0.5, b=1},
-    shadow   = {r=0.3, g=0, b=0.3}, -- FIX: not invisible
+    shadow   = {r=0, g=0,   b=0},
     arcane   = {r=0.6, g=0, b=0.8},
     dodge    = {r=1, g=1,   b=0},
     parry    = {r=0, g=1,   b=1},
@@ -35,14 +28,54 @@ local COLORS = {
 }
 
 -- =======================
--- Utilities
+-- WoW Class Colors
+-- =======================
+local CLASS_COLORS = {
+    DRUID     = {r=1.0, g=0.49, b=0.04},
+    MONK      = {r=0.0, g=1.0, b=0.59},
+    SHAMAN    = {r=0.0, g=0.44, b=0.87},
+    PRIEST    = {r=1.0, g=1.0, b=1.0},
+    PALADIN   = {r=0.96, g=0.55, b=0.73},
+    EVOKER    = {r=0.20, g=0.58, b=0.50},
+}
+
+-- =======================
+-- Spec Mapping
+-- =======================
+local SPEC_MAP = {
+    -- Priest
+    [256] = {"PRIEST","DISCIPLINE"},
+    [257] = {"PRIEST","HOLY"},
+    [258] = {"PRIEST","SHADOW"},
+    -- Shaman
+    [264] = {"SHAMAN","RESTORATION"},
+    -- Druid
+    [105] = {"DRUID","RESTORATION"},
+    -- Paladin
+    [65]  = {"PALADIN","HOLY"},
+    -- Monk
+    [270] = {"MONK","MISTWEAVER"},
+    -- Evoker
+    [1468]= {"EVOKER","PRESERVATION"},
+}
+
+-- =======================
+-- Helpers
 -- =======================
 local function Colorize(text, color)
+    if not color then return text end
     return string.format("|cff%02x%02x%02x%s|r",
-        math.floor((color.r or 1)*255),
-        math.floor((color.g or 1)*255),
-        math.floor((color.b or 1)*255),
+        math.floor(color.r*255),
+        math.floor(color.g*255),
+        math.floor(color.b*255),
         text)
+end
+
+local function SafeGetOptionColor(key)
+    if MyCombatTextOptions and MyCombatTextOptions.GetColor then
+        return MyCombatTextOptions:GetColor(key) or COLORS[key] or {r=1,g=1,b=1}
+    end
+    return COLORS[key] or {r=1,g=1,b=1}
 end
 
 local function ShowFloating(msg, isCrit)
@@ -52,69 +85,103 @@ local function ShowFloating(msg, isCrit)
 end
 
 -- =======================
+-- Combat Stats
+-- =======================
+local combatStats = {
+    taken=0, dealt=0, absorbed=0, blocked=0,
+    parried=0, dodged=0, missed=0, cooldownsUsed={},
+}
+local fullCombatLog = {}
+local prevForces = 0
+
+-- =======================
 -- Combat Log Handler
 -- =======================
 local function HandleCombatLogEvent()
-    local timestamp, subEvent, _, srcGUID, srcName, _, _, dstGUID, dstName,
-        _, _, spellID, spellName, spellSchool, amount, overkill,
-        school, resisted, blocked, absorbed, critical = CombatLogGetCurrentEventInfo()
+    local timestamp, subEvent, _, sourceGUID, sourceName, _, _, destGUID, destName,
+        _, _, spellID, spellName, school, amount, overkill, resisted, blocked, absorbed, critical =
+        CombatLogGetCurrentEventInfo()
 
+    -- Fix SWING_DAMAGE argument shift
     if subEvent == "SWING_DAMAGE" then
-        amount, overkill, school, resisted, blocked, absorbed, critical = spellID, spellSchool, amount, overkill, school, resisted, blocked, absorbed
         spellName = "Melee"
+        amount, overkill, school, resisted, blocked, absorbed, critical = select(12, CombatLogGetCurrentEventInfo())
     end
 
-    -- === OUTGOING ===
-    if srcGUID == playerGUID and amount then
-        ShowFloating(Colorize("+"..amount.." "..spellName, COLORS.magical), critical)
+    amount = amount or 0
+    spellName = spellName or "Unknown"
+    blocked = blocked or 0
+    absorbed = absorbed or 0
+
+    -- OUTGOING damage
+    if sourceGUID == playerGUID then
+        if subEvent == "SWING_DAMAGE" or subEvent == "RANGE_DAMAGE" or
+           subEvent == "SPELL_DAMAGE" or subEvent == "SPELL_PERIODIC_DAMAGE" then
+            combatStats.dealt = combatStats.dealt + amount
+            ShowFloating(Colorize(string.format("+%d (%s)", amount, spellName), SafeGetOptionColor("magical")), critical)
+        end
     end
 
-    -- === INCOMING ===
-    if dstGUID == playerGUID and amount then
-        ShowFloating(Colorize("-"..amount.." "..(spellName or "Hit"), COLORS.physical), critical)
-    end
-end
-
--- =======================
--- Dungeon Forces
--- =======================
-local prevForces = 0
-local function QueryForcesCriterion()
-    for i=1,10 do
-        local name, _, _, cur, total = C_Scenario.GetCriteriaInfo(i)
-        if name and (name:lower():find("force") or name:lower():find("enemy")) then
-            return cur, total
+    -- INCOMING damage
+    if destGUID == playerGUID then
+        if subEvent == "SWING_DAMAGE" or subEvent == "RANGE_DAMAGE" or
+           subEvent == "SPELL_DAMAGE" or subEvent == "SPELL_PERIODIC_DAMAGE" then
+            combatStats.taken = combatStats.taken + amount
+            ShowFloating(Colorize(string.format("-%d (%s)", amount, spellName), SafeGetOptionColor("physical")), critical)
+        elseif subEvent == "SWING_MISSED" or subEvent == "SPELL_MISSED" or subEvent == "RANGE_MISSED" then
+            local missType = select(15, CombatLogGetCurrentEventInfo()) or ""
+            if missType == "DODGE" then ShowFloating(Colorize("Dodged", SafeGetOptionColor("dodge")))
+            elseif missType == "PARRY" then ShowFloating(Colorize("Parried", SafeGetOptionColor("parry")))
+            elseif missType == "MISS" then ShowFloating(Colorize("Missed", SafeGetOptionColor("miss")))
+            elseif missType == "ABSORB" then ShowFloating(Colorize("Absorbed", SafeGetOptionColor("absorb")))
+            elseif missType == "BLOCK" then ShowFloating(Colorize("Blocked", SafeGetOptionColor("block"))) end
         end
     end
 end
-local function ShowForcesFloatingText()
-    local cur, total = QueryForcesCriterion()
-    if not cur or not total or total==0 then return end
-    local gained = cur - prevForces
-    if gained < 0 then gained = cur end
-    prevForces = cur
-    ShowFloating(Colorize(("+"..gained.." mobs (%.1f%%)"):format((cur/total)*100), COLORS.coach))
+
+-- =======================
+-- Summaries
+-- =======================
+local function ShowCombatSummary()
+    local total = combatStats.taken
+    local absorbedPct = total>0 and (combatStats.absorbed/total*100) or 0
+    local blockedPct = total>0 and (combatStats.blocked/total*100) or 0
+
+    ShowFloating(Colorize("===== Combat Summary =====", SafeGetOptionColor("coach")))
+    ShowFloating(Colorize(string.format("Absorbed: %d (%.1f%%)", combatStats.absorbed, absorbedPct), SafeGetOptionColor("absorb")))
+    ShowFloating(Colorize(string.format("Blocked: %d (%.1f%%)", combatStats.blocked, blockedPct), SafeGetOptionColor("block")))
+    ShowFloating(Colorize("Damage Taken: "..combatStats.taken, SafeGetOptionColor("physical")))
+    ShowFloating(Colorize("Damage Dealt: "..combatStats.dealt, SafeGetOptionColor("magical")))
+
+    -- Reset
+    for k,_ in pairs(combatStats) do
+        if type(combatStats[k])=="number" then combatStats[k]=0
+        elseif type(combatStats[k])=="table" then combatStats[k]={} end
+    end
 end
 
 -- =======================
--- Event Handler
+-- Event Dispatcher
 -- =======================
-f:SetScript("OnEvent", function(self, event, ...)
-    if event == "PLAYER_LOGIN" then
+f:SetScript("OnEvent", function(self,event,...)
+    if event=="PLAYER_LOGIN" then
         playerGUID = UnitGUID("player")
-        prevForces = 0
-
-    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        prevForces=0
+    elseif event=="COMBAT_LOG_EVENT_UNFILTERED" then
         HandleCombatLogEvent()
-
-    elseif event == "PLAYER_REGEN_ENABLED" then
-        ShowFloating(Colorize("Combat ended", COLORS.coach))
-
-    elseif event == "CHALLENGE_MODE_COMPLETED" then
-        ShowFloating(Colorize("Dungeon Complete!", COLORS.coach))
-        prevForces = 0
-
-    elseif event == "UNIT_DIED" then
-        C_Timer.After(0.35, ShowForcesFloatingText)
+    elseif event=="PLAYER_REGEN_ENABLED" then
+        ShowCombatSummary()
+    elseif event=="CHALLENGE_MODE_COMPLETED" then
+        ShowFloating(Colorize("Dungeon Completed!", SafeGetOptionColor("coach")))
+        fullCombatLog = {}
+        prevForces=0
+    elseif event=="UNIT_DIED" then
+        C_Timer.After(0.35, function() end) -- stub for mob forces
     end
 end)
+
+f:RegisterEvent("PLAYER_LOGIN")
+f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+f:RegisterEvent("PLAYER_REGEN_ENABLED")
+f:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+f:RegisterEvent("UNIT_DIED")
