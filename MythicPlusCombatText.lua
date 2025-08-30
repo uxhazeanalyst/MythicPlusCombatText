@@ -62,6 +62,22 @@ local function GetSchoolTags(school)
     end
     return tags
 end
+local lastHealAlert = 0
+local function HealerAlert(msg)
+    if not MyCombatTextOptions:IsHealerCoachEnabled() then return end
+    if GetTime() - lastHealAlert > 5 then
+        CombatText_AddMessage("|cff00ff99Healing Coach:|r "..msg, CombatText_StandardScroll, 0,1,0)
+        lastHealAlert = GetTime()
+    end
+end
+
+-- Example triggers (pseudo-code, inside CLEU handling):
+if st_burst > 40000 then
+    HealerAlert("Tank burst! Consider: Pain Suppression / Ironbark")
+end
+if aoe_burst > 80000 then
+    HealerAlert("Group AoE! Try: Healing Tide / Barrier")
+end
 
 -- =======================
 -- Bleed spell list (extendable)
