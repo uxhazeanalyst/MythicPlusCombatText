@@ -234,7 +234,9 @@ local function SuggestHealingCooldowns(damageSpike)
         if cds then
             for _, cd in ipairs(cds) do
                 if damageSpike > 0.3 then -- >30% group HP lost quickly
-                    ShowFloating(Colorize("Suggest: "..cd.name, {r=0, g=1, b=0}), false)
+                    local classColor = CLASS_COLORS[class] or {r=0, g=1, b=0}
+                    ShowFloating(Colorize("Suggest: "..cd.name, classColor), false)
+
                 end
             end
         end
